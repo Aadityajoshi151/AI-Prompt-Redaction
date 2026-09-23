@@ -1,4 +1,10 @@
+<div align="center">
+
 # AI Prompt Redaction (APR)
+
+  <img src="icons/icon.svg" alt="AI Prompt Redaction icon" width="96" height="96">
+
+</div>
 
 Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.
 
