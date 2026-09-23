@@ -9,7 +9,7 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const out = path.join(root, "build", "chromium");
 // Everything the extension needs at runtime. Keep in sync with manifest.json.
-const FILES = ["LICENSE", "src", "popup"];
+const FILES = ["LICENSE", "src", "popup", "icons"];
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
