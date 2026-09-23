@@ -1,0 +1,26 @@
+{
+  "name": "ai-prompt-redaction",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.",
+  "scripts": {
+    "test": "node test/detectors.test.js && node test/interceptor.test.js && node test/indicator.test.js",
+    "lint": "web-ext lint --warnings-as-errors",
+    "build": "web-ext build --overwrite-dest"
+  },
+  "webExt": {
+    "ignoreFiles": [
+      "test",
+      "test/**",
+      "README.md",
+      "CLAUDE.md",
+      "release-instructions.md",
+      "package.json",
+      "package-lock.json"
+    ]
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0",
+    "web-ext": "^10.6.0"
+  }
+}
