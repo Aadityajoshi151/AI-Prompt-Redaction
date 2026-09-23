@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AI Prompt Redaction</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AI Prompt Redaction</h1>
+      <p id="stats" class="muted">Nothing redacted yet</p>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="enabled">
+      <span class="track" aria-hidden="true"></span>
+      <span class="sr">Redaction on</span>
+    </label>
+  </header>
+
+  <div id="access" class="notice" hidden>
+    <p>Redaction is paused because this extension can't access claude.ai.</p>
+    <button id="grant" type="button">Allow access to claude.ai</button>
+  </div>
+  <p id="access-done" class="notice" hidden>Access granted. Reload any open claude.ai tabs to start redacting.</p>
+
+  <section>
+    <h2>Try it</h2>
+    <textarea id="test" rows="4" spellcheck="false"
+      placeholder="Paste text or code to see what would be redacted"></textarea>
+    <div id="preview" class="preview" aria-live="polite"></div>
+  </section>
+
+  <div id="sections"></div>
+
+  <section>
+    <h2>Custom terms</h2>
+    <p class="muted">One per line. Useful for client names, codenames or internal project names.</p>
+    <textarea id="terms" rows="3" spellcheck="false" placeholder="Project Falcon&#10;Acme Holdings"></textarea>
+  </section>
+
+  <script src="../src/detectors.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

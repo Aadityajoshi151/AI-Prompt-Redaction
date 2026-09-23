@@ -1,0 +1,84 @@
+:root {
+  --paper: #EEF1EC;
+  --ink: #1F2A2E;
+  --muted: #5E6B68;
+  --line: #CBD3CF;
+  --field: #F8FAF7;
+  --marker: #E8C547;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; width: 360px; padding: 16px 18px 20px;
+  background: var(--paper); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+p { margin: 0 0 8px; }
+.muted { color: var(--muted); font-size: 13px; }
+section { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line); }
+
+textarea {
+  width: 100%; resize: vertical; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink);
+  font: 12.5px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+}
+textarea:focus-visible, input:focus-visible + .track { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.preview {
+  margin-top: 8px; font: 12.5px/1.7 ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.preview:empty { display: none; }
+/* The redaction bar: ink block with the placeholder name set small inside it */
+.bar {
+  background: var(--ink); color: var(--marker); border-radius: 2px;
+  padding: 1px 5px; font-size: 11px;
+}
+
+h3 { font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 12px 0 2px; }
+
+.sec-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.sec-head p { margin: 0; }
+.sec-head h2 { font-size: 15px; margin-bottom: 2px; }
+button.link {
+  flex: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink);
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--marker);
+  text-decoration-thickness: 2px;
+}
+button.link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+
+.row { display: flex; align-items: flex-start; gap: 9px; padding: 4px 0; cursor: pointer; }
+.row input { accent-color: var(--ink); width: 15px; height: 15px; margin: 2px 0 0; flex: none; }
+.row .name { display: block; }
+.row .hint { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; }
+
+.switch { position: relative; flex: none; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.track {
+  display: block; width: 40px; height: 22px; border-radius: 11px; background: var(--line);
+  position: relative; transition: background .15s;
+}
+.track::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; transition: transform .15s;
+}
+.switch input:checked + .track { background: var(--ink); }
+.switch input:checked + .track::after { transform: translateX(18px); background: var(--marker); }
+.notice {
+  margin: 10px 0 0; padding: 10px 12px; border-radius: 6px;
+  background: var(--ink); color: var(--paper); font-size: 13px;
+}
+.notice p { margin: 0 0 8px; }
+.notice button {
+  font: inherit; font-weight: 600; cursor: pointer; border: 0; border-radius: 5px;
+  padding: 6px 10px; background: var(--marker); color: var(--ink);
+}
+.notice button:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+body.off .group, body.off #terms, body.off .sec-head button { opacity: .5; }
+
+@media (prefers-reduced-motion: reduce) { .track, .track::after { transition: none; } }
