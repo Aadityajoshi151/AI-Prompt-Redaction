@@ -18,6 +18,7 @@
       "scripts/**",
       "build",
       "build/**",
+      "icons/icon.svg",
       "README.md",
       "CLAUDE.md",
       "release-instructions.md",
