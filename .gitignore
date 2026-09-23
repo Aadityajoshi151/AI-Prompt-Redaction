@@ -4,3 +4,4 @@ web-ext-artifacts/
 .web-ext-config.cjs
 release-instructions.md
 CLAUDE.md
+build/
