@@ -1,1 +1,1 @@
-# Claude Redactor
+# AI Prompt Redaction (APR)
