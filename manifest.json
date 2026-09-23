@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "AI Prompt Redaction",
+  "version": "1.0.0",
+  "author": "Aaditya Joshi",
+  "description": "Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "AI Prompt Redaction"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "src/detectors.js",
+        "src/interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "src/detectors.js",
+        "src/indicator.js",
+        "src/bridge.js"
+      ],
+      "css": [
+        "src/indicator.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ai-prompt-redaction@local",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  }
+}
