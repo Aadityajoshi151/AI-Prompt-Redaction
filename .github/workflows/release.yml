@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Stops the release if the tag was pushed without bumping manifest.json,
+      # so a zip with the wrong version never reaches the release page or AMO.
+      - name: Check tag matches manifest version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest version $MANIFEST_VERSION"
+            echo "Bump \"version\" in manifest.json, then re-tag."
+            exit 1
+          fi
+          echo "Releasing version $MANIFEST_VERSION"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      # Builds the Firefox zip (for AMO) and the Chromium zip (Chrome, Edge, Brave).
+      - name: Build extension
+        run: npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: web-ext-artifacts/*.zip
+          generate_release_notes: true
