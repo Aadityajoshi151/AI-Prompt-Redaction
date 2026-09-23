@@ -1,1 +1,6 @@
+.DS_Store
+node_modules/
+web-ext-artifacts/
+.web-ext-config.cjs
+release-instructions.md
 CLAUDE.md
