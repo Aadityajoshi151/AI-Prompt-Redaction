@@ -1,0 +1,81 @@
+/* Injected by the manifest; namespaced with apr- so nothing leaks into claude.ai. */
+
+/* Text that will be redacted, in the message box */
+::highlight(apr-pending) {
+  background-color: #E8C547;
+  color: #1F2A2E;
+}
+/* Original values in your sent message: shown struck through, the AI never got them */
+::highlight(apr-sent) {
+  background-color: #F2DE93;
+  color: #1F2A2E;
+  text-decoration: line-through;
+  text-decoration-color: #8A6A0C;
+}
+/* [REDACTED_…] placeholders in the chat, drawn as redaction bars */
+::highlight(apr-placeholder) {
+  background-color: #1F2A2E;
+  color: #E8C547;
+}
+
+html .apr-ui {
+  all: initial;
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 2147483646;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #EEF1EC;
+  background: #1F2A2E;
+  pointer-events: none;
+}
+
+html .apr-pill,
+html .apr-toast {
+  display: flex;
+  gap: 9px;
+  align-items: stretch;
+  max-width: min(440px, calc(100vw - 16px));
+  padding: 7px 12px 7px 8px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(20, 30, 34, 0.28);
+}
+
+html .apr-toast {
+  right: 20px;
+  bottom: 20px;
+  max-width: 340px;
+  padding: 11px 14px 11px 10px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.18s, transform 0.18s;
+}
+html .apr-toast.apr-on { opacity: 1; transform: none; }
+
+html .apr-ui .apr-bar {
+  all: initial;
+  flex: none;
+  width: 5px;
+  border-radius: 2px;
+  background: #E8C547;
+}
+html .apr-ui .apr-pill-text {
+  all: initial;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  color: inherit;
+}
+html .apr-ui .apr-pill-title { all: initial; font: inherit; font-weight: 600; color: inherit; }
+html .apr-ui .apr-pill-detail { all: initial; font: inherit; font-size: 12px; color: #B9C4C0; }
+
+html .apr-tip {
+  max-width: 300px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(20, 30, 34, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .apr-toast { transition: none; }
+}
