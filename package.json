@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node test/detectors.test.js && node test/interceptor.test.js && node test/indicator.test.js",
     "lint": "web-ext lint --warnings-as-errors",
+    "dev": "web-ext run --target firefox-desktop --target chromium",
     "build": "npm run build:firefox && npm run build:chromium",
     "build:firefox": "web-ext build --overwrite-dest --filename \"{name}-{version}-firefox.zip\"",
     "build:chromium": "node scripts/stage-chromium.js && web-ext build --source-dir build/chromium --artifacts-dir web-ext-artifacts --overwrite-dest --filename \"{name}-{version}-chromium.zip\""
