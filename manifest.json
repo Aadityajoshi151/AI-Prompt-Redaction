@@ -3,13 +3,9 @@
   "name": "AI Prompt Redaction",
   "version": "1.0.0",
   "author": "Aaditya Joshi",
-  "description": "Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.",
-  "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "https://claude.ai/*"
-  ],
+  "description": "A browser extension to redact secrets and sensitive data before they are sent to Claude.ai",
+  "permissions": ["storage"],
+  "host_permissions": ["https://claude.ai/*"],
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -26,28 +22,15 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://claude.ai/*"
-      ],
-      "js": [
-        "src/detectors.js",
-        "src/interceptor.js"
-      ],
+      "matches": ["https://claude.ai/*"],
+      "js": ["src/detectors.js", "src/interceptor.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": [
-        "https://claude.ai/*"
-      ],
-      "js": [
-        "src/detectors.js",
-        "src/indicator.js",
-        "src/bridge.js"
-      ],
-      "css": [
-        "src/indicator.css"
-      ],
+      "matches": ["https://claude.ai/*"],
+      "js": ["src/detectors.js", "src/indicator.js", "src/bridge.js"],
+      "css": ["src/indicator.css"],
       "run_at": "document_start"
     }
   ],
@@ -56,9 +39,7 @@
       "id": "ai-prompt-redaction@local",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": [
-          "none"
-        ]
+        "required": ["none"]
       }
     },
     "gecko_android": {
