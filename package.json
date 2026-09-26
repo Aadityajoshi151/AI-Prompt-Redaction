@@ -2,7 +2,7 @@
   "name": "ai-prompt-redaction",
   "version": "1.0.0",
   "private": true,
-  "description": "Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.",
+  "description": "A browser extension to redact secrets and sensitive data before they are sent to Claude.ai",
   "scripts": {
     "test": "node test/detectors.test.js && node test/interceptor.test.js && node test/indicator.test.js",
     "lint": "web-ext lint --warnings-as-errors",
