@@ -6,7 +6,7 @@
 
 </div>
 
-Scans messages on claude.ai and redacts secrets and sensitive data before they are sent.
+A browser extension to redact secrets and sensitive data before they are sent to Claude.ai. All detection happens locally in your browser, and the extension doesn't collect any of your data.
 
 > [!IMPORTANT]
 >
@@ -16,28 +16,62 @@ Scans messages on claude.ai and redacts secrets and sensitive data before they a
 
 ## Features
 
-- **Redacts before sending** - API keys, passwords, card numbers, ID numbers and similar values are replaced with placeholders such as `[REDACTED_EMAIL_1]` before your message leaves the browser. It works however the message is sent: Enter, the send button, retry or edit.
-- **Consistent placeholders** - the same value always gets the same placeholder within a page session, so the AI can still follow references to it.
-- **Shows what it changed** - values that will be redacted are highlighted in the message box as you type. After sending, a toast confirms what was removed, and the original values stay marked in the chat with a tooltip showing what the AI received instead.
-- **Configurable** - turn individual detectors on or off, and add your own custom terms (client names, codenames, internal project names).
-- **Try it** - paste text into the popup to preview what would be redacted.
-- **Local-only** - all scanning happens in your browser. The extension makes no network requests of its own.
+- **Redacts before sending** - sensitive values are replaced with placeholders such as `[REDACTED_EMAIL_1]`.
+- **Consistent placeholders** - the same value always gets the same placeholder, so the AI can still follow references to it.
+- **Shows what it changed** - values are highlighted as you type, and stay marked in the chat after sending.
+- **Custom terms** - add your own words to redact, such as client names or product names.
+- **Try it** - preview in the popup what would be redacted.
 
 ## What it detects
 
-Detectors marked _(off)_ are off by default because they can match ordinary codes. Turn them on in the popup.
+### Personal information
 
-**Personal information**
+| Category        | Detector                        | Example or note                    | On by default |
+| --------------- | ------------------------------- | ---------------------------------- | :-----------: |
+| Contact details | UPI IDs                         | name@okaxis, 98…@ybl               |      ✅       |
+| Contact details | Email addresses                 | jane@company.com                   |      ✅       |
+| Contact details | Phone numbers with country code | +91 99999 99999, +1 (555) 123-4567 |      ✅       |
+| Contact details | Indian mobile numbers           | 99999 99999, 09876543210           |      ✅       |
+| Government IDs  | Aadhaar numbers                 | Checked with the Verhoeff checksum |      ✅       |
+| Government IDs  | GSTINs                          | 27ABCDE1234F1Z5                    |      ✅       |
+| Government IDs  | PAN numbers                     | ABCPE1234F                         |      ✅       |
+| Government IDs  | Voter IDs (EPIC)                | ABC1234567; may flag order codes   |      ❌       |
+| Government IDs  | Indian passport numbers         | A1234567; may flag other codes     |      ❌       |
+| Government IDs  | US Social Security numbers      | 123-45-6789                        |      ✅       |
+| Financial       | Bank account numbers            | When labelled: A/C No. 0123…       |      ✅       |
+| Financial       | Card numbers                    | Checked with the Luhn checksum     |      ✅       |
+| Financial       | IBANs                           | GB82 WEST 1234 …                   |      ✅       |
 
-- Contact details: email addresses, phone numbers with country code, Indian mobile numbers, UPI IDs
-- Government IDs: Aadhaar (checksum-validated), PAN, GSTIN, US Social Security numbers, Voter IDs _(off)_, Indian passport numbers _(off)_
-- Financial: card numbers (checksum-validated), IBANs, labelled bank account numbers
+### Code and technical
 
-**Code and technical**
-
-- Keys and tokens: private keys, AWS, Anthropic, OpenAI, GitHub, Stripe, Slack, Google/Firebase, Azure, npm, PyPI, GitLab, Hugging Face, SendGrid, Twilio, Shopify, DigitalOcean and Telegram tokens, webhook URLs, JSON Web Tokens
-- Config, headers and commands: passwords in URLs, secrets in URL parameters, secret values in configs and `.env` files, `Authorization` and `Cookie` headers, passwords in `curl -u`, random-looking strings _(off)_
-- Network and infrastructure: IPv4 and IPv6 addresses, MAC addresses, internal hostnames, usernames in file paths, AWS account IDs in ARNs
+| Category                     | Detector                                | Example or note                                                                    | On by default |
+| ---------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------- | :-----------: |
+| Keys and tokens              | Private keys                            | -----BEGIN … PRIVATE KEY-----                                                      |      ✅       |
+| Keys and tokens              | AWS access key IDs                      | AKIA…                                                                              |      ✅       |
+| Keys and tokens              | AWS secret keys                         | aws_secret_access_key = …                                                          |      ✅       |
+| Keys and tokens              | Anthropic API keys                      | sk-ant-…                                                                           |      ✅       |
+| Keys and tokens              | OpenAI API keys                         | sk-proj-…                                                                          |      ✅       |
+| Keys and tokens              | GitHub tokens                           | `ghp_…`, `github_pat_…`                                                            |      ✅       |
+| Keys and tokens              | Stripe secret keys                      | `sk_live_…`                                                                        |      ✅       |
+| Keys and tokens              | Slack tokens                            | xoxb-…                                                                             |      ✅       |
+| Keys and tokens              | Google / Firebase API keys              | AIza…                                                                              |      ✅       |
+| Keys and tokens              | Other service tokens                    | npm, PyPI, GitLab, Hugging Face, SendGrid, Twilio, Shopify, DigitalOcean, Telegram |      ✅       |
+| Keys and tokens              | Azure connection string keys            | AccountKey=…, SharedAccessKey=…                                                    |      ✅       |
+| Keys and tokens              | Webhook URLs                            | Slack, Discord, Teams                                                              |      ✅       |
+| Keys and tokens              | JSON Web Tokens                         | eyJ….eyJ….…                                                                        |      ✅       |
+| Config, headers and commands | Passwords in URLs                       | postgres://user:pass@host                                                          |      ✅       |
+| Config, headers and commands | Secrets in URL parameters               | ?token=…, &sig=…, X-Amz-Signature                                                  |      ✅       |
+| Config, headers and commands | Secret values in configs and .env files | DB_PASSWORD=…, "apiKey": "…"                                                       |      ✅       |
+| Config, headers and commands | Authorization headers                   | Bearer …, Basic …                                                                  |      ✅       |
+| Config, headers and commands | Cookie headers                          | Cookie: session=…                                                                  |      ✅       |
+| Config, headers and commands | Passwords in curl commands              | curl -u user:pass                                                                  |      ✅       |
+| Config, headers and commands | Random-looking strings                  | Catches unknown key formats; may flag hashes                                       |      ❌       |
+| Network and infrastructure   | MAC addresses                           | 3c:22:fb:9a:10:4e                                                                  |      ✅       |
+| Network and infrastructure   | IPv6 addresses                          | 2001:db8::8a2e:370:7334 (skips ::1)                                                |      ✅       |
+| Network and infrastructure   | IPv4 addresses                          | 10.0.12.7 (skips 127.x, 0.0.0.0)                                                   |      ✅       |
+| Network and infrastructure   | Internal hostnames                      | db.prod.internal, \*.corp, \*.cluster.local                                        |      ✅       |
+| Network and infrastructure   | Usernames in file paths                 | /home/jane/…, C:\Users\jane\…                                                      |      ✅       |
+| Network and infrastructure   | AWS account IDs in ARNs                 | arn:aws:iam::123456789012:…                                                        |      ✅       |
 
 The code detectors are tuned to leave ordinary code alone: UUIDs, git hashes, version numbers, timestamps, `127.0.0.1`, `process.env.X` and similar aren't redacted.
 
@@ -82,5 +116,3 @@ Your browser may remind you that a developer-mode extension is installed. That's
 
 - Only claude.ai is supported for now.
 - File uploads aren't scanned. Pasted text and text attachments are.
-
-Found a miss or a false positive? [Open a detection issue](https://github.com/Aadityajoshi151/AI-Prompt-Redaction/issues/new/choose)
