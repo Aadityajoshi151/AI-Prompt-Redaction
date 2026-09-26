@@ -42,6 +42,20 @@ h3 { font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 12px 0 2p
 .sec-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .sec-head p { margin: 0; }
 .sec-head h2 { font-size: 15px; margin-bottom: 2px; }
+.sec-titles p { cursor: pointer; }
+/* Section title doubles as the expand/collapse button, with a chevron before it */
+.sec-toggle {
+  display: flex; align-items: center; gap: 7px; padding: 0;
+  font: inherit; color: inherit; text-align: left;
+  background: none; border: 0; cursor: pointer;
+}
+.sec-toggle::before {
+  content: ""; flex: none; width: 6px; height: 6px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.sec-toggle[aria-expanded="true"]::before { transform: rotate(45deg); }
+.sec-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 button.link {
   flex: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink);
   background: none; border: 0; padding: 2px 0; cursor: pointer;
@@ -79,6 +93,6 @@ button.link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; 
 .notice button:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-body.off .group, body.off #terms, body.off .sec-head button { opacity: .5; }
+body.off .group, body.off #terms, body.off .sec-head button.link { opacity: .5; }
 
-@media (prefers-reduced-motion: reduce) { .track, .track::after { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .track, .track::after, .sec-toggle::before { transition: none; } }

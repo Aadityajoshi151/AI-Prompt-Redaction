@@ -42,20 +42,39 @@
     const box = document.createElement("section");
     box.className = "sec";
 
+    // Sections start collapsed; the title button expands them.
+    const body = document.createElement("div");
+    body.className = "sec-body";
+    body.id = "sec-" + sec.id;
+    body.hidden = true;
+
     const head = document.createElement("div");
     head.className = "sec-head";
     const titles = document.createElement("div");
+    titles.className = "sec-titles";
     const h2 = document.createElement("h2");
-    h2.textContent = sec.title;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "sec-toggle";
+    toggle.textContent = sec.title;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", body.id);
+    toggle.addEventListener("click", () => {
+      body.hidden = !body.hidden;
+      toggle.setAttribute("aria-expanded", String(!body.hidden));
+    });
+    h2.appendChild(toggle);
     const desc = document.createElement("p");
     desc.className = "muted";
     desc.textContent = sec.description;
+    // The description is part of the click target too, for mouse users.
+    desc.addEventListener("click", () => toggle.click());
     titles.append(h2, desc);
     const all = document.createElement("button");
     all.type = "button";
     all.className = "link";
     head.append(titles, all);
-    box.appendChild(head);
+    box.append(head, body);
 
     const boxes = [];
     for (const sub of sec.subsections) {
@@ -89,7 +108,7 @@
         group.appendChild(row);
         boxes.push([det, cb]);
       }
-      box.appendChild(group);
+      body.appendChild(group);
     }
 
     function refresh() {
