@@ -609,9 +609,59 @@
       : det.defaultOn;
   }
 
+  // Copies of detector regexes with the `d` flag, for match positions.
+  const INDEXED = new Map();
+  function indexed(det) {
+    let re = INDEXED.get(det.id);
+    if (!re) INDEXED.set(det.id, (re = new RegExp(det.regex.source, det.regex.flags + "d")));
+    return re;
+  }
+
+  // Every match of every enabled detector in the original text, as spans.
+  // Read-only: used to find the other categories a redacted value falls into.
+  function scanSpans(text, customRe, overrides) {
+    const spans = [];
+    if (customRe) {
+      for (const m of text.matchAll(customRe)) {
+        spans.push({ id: "CUSTOM", value: m[0], start: m.index, end: m.index + m[0].length });
+      }
+    }
+    for (const det of DETECTORS) {
+      if (!isEnabled(det, overrides)) continue;
+      const g = det.capture || 0;
+      for (const m of text.matchAll(indexed(det))) {
+        const secret = m[g];
+        if (!secret || secret.indexOf("REDACTED_") !== -1) continue;
+        if (det.validate && !det.validate(secret)) continue;
+        spans.push({ id: det.id, value: secret, start: m.indices[g][0], end: m.indices[g][1] });
+      }
+    }
+    return spans;
+  }
+
+  // For each redacted value, the other detectors whose whole match lies inside
+  // it. Wider overlapping matches are left out: the part outside the redacted
+  // value was sent, so "also matches" would overstate what was hidden.
+  function addAlso(text, matches, customRe, overrides) {
+    const spans = scanSpans(text, customRe, overrides);
+    const order = (id) => (id === "CUSTOM" ? -1 : DETECTORS.findIndex((d) => d.id === id));
+    for (const m of matches) {
+      const also = new Set();
+      for (const own of spans) {
+        if (own.id !== m.id || own.value !== m.value) continue;
+        for (const o of spans) {
+          if (o.id !== m.id && o.start >= own.start && o.end <= own.end) also.add(o.id);
+        }
+      }
+      m.also = [...also].sort((a, b) => order(a) - order(b));
+    }
+  }
+
   /**
+   * Detectors run in array order; the first to match a value names its
+   * placeholder. `also` lists the other categories the value falls into.
    * @returns {{text: string, findings: Object<string, number>,
-   *            matches: Array<{id: string, value: string, placeholder: string}>}}
+   *            matches: Array<{id: string, value: string, placeholder: string, also: string[]}>}}
    */
   function redact(text, opts) {
     opts = opts || {};
@@ -635,16 +685,16 @@
     const terms = (opts.customTerms || [])
       .map((t) => t.trim())
       .filter((t) => t.length >= 2);
-    if (terms.length) {
-      const re = new RegExp(
-        terms
-          .map(escapeRegex)
-          .sort((a, b) => b.length - a.length)
-          .join("|"),
-        "gi",
-      );
-      out = out.replace(re, (m) => record("CUSTOM", m));
-    }
+    const customRe = terms.length
+      ? new RegExp(
+          terms
+            .map(escapeRegex)
+            .sort((a, b) => b.length - a.length)
+            .join("|"),
+          "gi",
+        )
+      : null;
+    if (customRe) out = out.replace(customRe, (m) => record("CUSTOM", m));
 
     for (const det of DETECTORS) {
       if (!isEnabled(det, opts.overrides)) continue;
@@ -665,6 +715,7 @@
           .join("");
       });
     }
+    if (matches.length) addAlso(text, matches, customRe, opts.overrides);
     return { text: out, findings, matches };
   }
 
