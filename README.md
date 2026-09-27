@@ -2,7 +2,7 @@
 
 # AI Prompt Redaction (APR)
 
-  <img src="icons/icon.svg" alt="AI Prompt Redaction icon" width="96" height="96">
+  <img src="icons/icon.png" alt="AI Prompt Redaction icon" width="96" height="96">
 
 </div>
 
@@ -116,3 +116,7 @@ Your browser may remind you that a developer-mode extension is installed. That's
 
 - Only claude.ai is supported for now.
 - File uploads aren't scanned. Pasted text and text attachments are.
+
+## Credits
+
+<a href="https://www.flaticon.com/free-icons/agent" title="agent icons">Agent icons created by Magnific - Flaticon</a>
