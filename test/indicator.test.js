@@ -5,7 +5,7 @@ const { JSDOM } = require("jsdom");
 const fs = require("fs"), path = require("path"), assert = require("assert");
 
 const dom = new JSDOM(`<!doctype html><html><body>
-  <div id="chat"><div><p>my email is jane@acme.com, server 10.0.0.7</p></div></div>
+  <div id="chat"><div><p>my email is jane@acme.com, account number 9876543210</p></div></div>
   <fieldset><div id="box" contenteditable="true"><p></p></div></fieldset>
 </body></html>`, { runScripts: "outside-only", url: "https://claude.ai/chat/1", pretendToBeVisual: true });
 const w = dom.window;
@@ -43,19 +43,21 @@ const post = (data) => w.dispatchEvent(new w.MessageEvent("message", { data, sou
   assert.strictEqual(pill.parentNode, w.document.documentElement, "UI mounted outside <body>");
   assert.deepStrictEqual(marked("apr-pending"), ["AKIAIOSFODNN7EXAMPLE", "db.prod.internal"]);
 
-  post({ tag: "__prompt_redaction__", type: "redacted", findings: { EMAIL: 1, IPV4: 1 },
-    matches: [{ id: "EMAIL", value: "jane@acme.com", placeholder: "[REDACTED_EMAIL_1]" },
-              { id: "IPV4", value: "10.0.0.7", placeholder: "[REDACTED_IPV4_1]" }] });
+  post({ tag: "__prompt_redaction__", type: "redacted", findings: { EMAIL: 1, BANK_ACCOUNT: 1 },
+    matches: [{ id: "EMAIL", value: "jane@acme.com", placeholder: "[REDACTED_EMAIL_1]", also: [] },
+              { id: "BANK_ACCOUNT", value: "9876543210", placeholder: "[REDACTED_BANK_ACCOUNT_1]", also: ["IN_MOBILE"] }] });
   await wait(600);
-  assert.match(w.document.querySelector(".apr-toast").textContent, /Redacted 2 items before sending/);
-  assert.deepStrictEqual(marked("apr-sent"), ["10.0.0.7", "jane@acme.com"]);
+  const toastText = w.document.querySelector(".apr-toast").textContent;
+  assert.match(toastText, /Redacted 2 items before sending/);
+  assert.match(toastText, /email, bank account \u00b7 1 also matched: mobile/, "other categories shown");
+  assert.deepStrictEqual(marked("apr-sent"), ["9876543210", "jane@acme.com"]);
   assert.strictEqual(store.local.stats.total, 2);
 
   const reply = w.document.createElement("p");
-  reply.textContent = "I'll email [REDACTED_EMAIL_1] once [REDACTED_IPV4_1] is up.";
+  reply.textContent = "I'll email [REDACTED_EMAIL_1] about [REDACTED_BANK_ACCOUNT_1].";
   w.document.getElementById("chat").appendChild(reply);
   await wait(600);
-  assert.deepStrictEqual(marked("apr-placeholder"), ["[REDACTED_EMAIL_1]", "[REDACTED_IPV4_1]"]);
+  assert.deepStrictEqual(marked("apr-placeholder"), ["[REDACTED_BANK_ACCOUNT_1]", "[REDACTED_EMAIL_1]"]);
 
   box.firstChild.textContent = "";
   await wait(700);

@@ -20,7 +20,7 @@
   const PH_RE = /\[REDACTED_([A-Z0-9_]+?)_\d+\]/g;
 
   let settings = { enabled: true, overrides: {}, customTerms: [] };
-  const sent = new Map();      // original value -> placeholder the AI received
+  const sent = new Map();      // original value -> match the AI received a placeholder for
   let pageTips = [];           // [{range, text}] for marks in the chat
   let pendingTips = [];        // [{range, text}] for marks in the message box
 
@@ -52,10 +52,21 @@
   // and never triggers our own MutationObserver.
   function mount(n) { if (!n.isConnected) document.documentElement.appendChild(n); }
 
-  function summarize(findings) {
-    return Object.entries(findings)
+  // "bank account, email ×2 · 1 also matched: mobile". Each item counts once,
+  // under the category that named its placeholder; other matches are extra info.
+  function summarize(findings, matches) {
+    const main = Object.entries(findings)
       .map(([id, n]) => R.shortName(id) + (n > 1 ? " \u00d7" + n : ""))
       .join(", ");
+    const multi = matches.filter((m) => m.also && m.also.length);
+    if (!multi.length) return main;
+    const also = [...new Set(multi.flatMap((m) => m.also))].map(R.shortName).join(", ");
+    return main + " \u00b7 " + multi.length + " also matched: " + also;
+  }
+  // "bank account (also matches: mobile)"
+  function categories(m) {
+    const also = m.also && m.also.length ? " (also matches: " + m.also.map(R.shortName).join(", ") + ")" : "";
+    return R.shortName(m.id) + also;
   }
   const plural = (n, word) => n + " " + word + (n === 1 ? "" : "s");
 
@@ -100,7 +111,7 @@
     if (!res.matches.length) return clearPending();
 
     pillTitle.textContent = plural(res.matches.length, "item") + " will be redacted before sending";
-    pillDetail.textContent = summarize(res.findings);
+    pillDetail.textContent = summarize(res.findings, res.matches);
     mount(pill);
     pillOn = true;
     place();
@@ -108,14 +119,14 @@
     hl("pending", "clear");
     pendingTips = [];
     if (composer.tagName === "TEXTAREA") return; // no text ranges inside a textarea
-    const byValue = new Map(res.matches.map((m) => [m.value, m.id]));
+    const byValue = new Map(res.matches.map((m) => [m.value, m]));
     const walker = document.createTreeWalker(composer, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      for (const [value, id] of byValue) {
+      for (const [value, m] of byValue) {
         eachOccurrence(n.data, value, (s, e) => {
           const r = rangeOf(n, s, e);
           hl("pending", "add", r);
-          pendingTips.push({ range: r, text: "Will be redacted (" + R.shortName(id) + ")" });
+          pendingTips.push({ range: r, text: "Will be redacted as " + categories(m) });
         });
       }
     }
@@ -159,6 +170,7 @@
     hl("placeholder", "clear");
     pageTips = [];
     const values = [...sent.keys()];
+    const byPlaceholder = new Map([...sent.values()].map((m) => [m.placeholder, m]));
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const t = n.data;
@@ -173,14 +185,16 @@
         for (let m = PH_RE.exec(t); m; m = PH_RE.exec(t)) {
           const r = rangeOf(n, m.index, m.index + m[0].length);
           hl("placeholder", "add", r);
-          pageTips.push({ range: r, text: "Redacted " + R.shortName(m[1]) + " by AI Prompt Redaction. The AI never saw the original." });
+          const what = byPlaceholder.has(m[0]) ? categories(byPlaceholder.get(m[0])) : R.shortName(m[1]);
+          pageTips.push({ range: r, text: "Redacted " + what + " by AI Prompt Redaction. The AI never saw the original." });
         }
       }
       for (const v of vals) {
         eachOccurrence(t, v, (s, e) => {
           const r = rangeOf(n, s, e);
           hl("sent", "add", r);
-          pageTips.push({ range: r, text: "Not sent. The AI received " + sent.get(v) + " instead." });
+          const m = sent.get(v);
+          pageTips.push({ range: r, text: "Not sent (" + categories(m) + "). The AI received " + m.placeholder + " instead." });
         });
       }
     }
@@ -232,9 +246,9 @@
   toast.append(toastBar, toastText);
   let toastTimer = 0;
 
-  function showToast(findings, count) {
-    toastTitle.textContent = "Redacted " + plural(count, "item") + " before sending";
-    toastDetail.textContent = summarize(findings) + ". Marked text in your message was not sent to the AI.";
+  function showToast(findings, matches) {
+    toastTitle.textContent = "Redacted " + plural(matches.length, "item") + " before sending";
+    toastDetail.textContent = summarize(findings, matches) + ". Marked text in your message was not sent to the AI.";
     mount(toast);
     requestAnimationFrame(() => toast.classList.add("apr-on"));
     clearTimeout(toastTimer);
@@ -248,9 +262,9 @@
       if (composer) scanComposer();
     },
     onRedacted(findings, matches) {
-      for (const m of matches) sent.set(m.value, m.placeholder);
+      for (const m of matches) sent.set(m.value, m);
       clearPending();
-      showToast(findings, matches.length);
+      showToast(findings, matches);
       schedulePageScan();
     },
   };
