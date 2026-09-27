@@ -159,5 +159,28 @@ const clean = [
 ];
 for (const s of clean) t("clean: " + s.slice(0, 44), () => none(s));
 
+console.log("Values matching several detectors");
+// [id, also] per match: the first detector in array order names the placeholder,
+// the others that match the same value are listed in `also`.
+const cats = (s, o) => R.redact(s, o).matches.map((m) => [m.id, m.also]);
+const allOn = { overrides: Object.fromEntries(R.DETECTORS.map((d) => [d.id, true])) };
+t("labelled bank account beats mobile", () =>
+  assert.deepStrictEqual(cats("account number: 9876543210"), [["BANK_ACCOUNT", ["IN_MOBILE"]]]));
+t("labelled bank account beats Aadhaar", () =>
+  assert.deepStrictEqual(cats("A/C No. 987654321012"), [["BANK_ACCOUNT", ["AADHAAR"]]]));
+t("GitHub token beats generic secret value", () =>
+  assert.deepStrictEqual(cats("token: ghp_" + "a1".repeat(18)), [["GITHUB_TOKEN", ["SECRET_ASSIGNMENT"]]]));
+t("URL secret beats generic secret value", () =>
+  assert.deepStrictEqual(cats("https://x.com/cb?token=abcdEFGH12345678"), [["URL_QUERY_SECRET", ["SECRET_ASSIGNMENT"]]]));
+t("AWS secret beats random string", () =>
+  assert.deepStrictEqual(cats("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", allOn),
+    [["AWS_SECRET_KEY", ["HIGH_ENTROPY"]]]));
+t("disabled detectors are not listed", () =>
+  assert.deepStrictEqual(cats("account number: 9876543210", { overrides: { IN_MOBILE: false } }), [["BANK_ACCOUNT", []]]));
+t("wider overlapping matches are not listed", () =>
+  assert.deepStrictEqual(cats("mail jane@acme.com", { customTerms: ["acme"] }), [["CUSTOM", []]]));
+t("single-category values have an empty list", () =>
+  assert.deepStrictEqual(cats("call 9876543210 or mail a@b.com"), [["EMAIL", []], ["IN_MOBILE", []]]));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
