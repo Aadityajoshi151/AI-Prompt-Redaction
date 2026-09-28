@@ -628,6 +628,9 @@
       : det.defaultOn;
   }
 
+  const PLACEHOLDER = /\[REDACTED_[A-Z0-9_]+?_\d+\]/;
+  const PLACEHOLDER_ONLY = /^\[REDACTED_[A-Z0-9_]+?_\d+\]$/;
+
   // Copies of detector regexes with the `d` flag, for match positions.
   const INDEXED = new Map();
   function indexed(det) {
@@ -637,14 +640,10 @@
   }
 
   // Every match of every enabled detector in the original text, as spans.
-  // Read-only: used to find the other categories a redacted value falls into.
-  function scanSpans(text, customRe, overrides) {
+  // Read-only: used to place custom terms and to find the other categories a
+  // redacted value falls into.
+  function detectorSpans(text, overrides) {
     const spans = [];
-    if (customRe) {
-      for (const m of text.matchAll(customRe)) {
-        spans.push({ id: "CUSTOM", value: m[0], start: m.index, end: m.index + m[0].length });
-      }
-    }
     for (const det of DETECTORS) {
       if (!isEnabled(det, overrides)) continue;
       const g = det.capture || 0;
@@ -661,8 +660,7 @@
   // For each redacted value, the other detectors whose whole match lies inside
   // it. Wider overlapping matches are left out: the part outside the redacted
   // value was sent, so "also matches" would overstate what was hidden.
-  function addAlso(text, matches, customRe, overrides) {
-    const spans = scanSpans(text, customRe, overrides);
+  function addAlso(matches, spans) {
     const order = (id) => (id === "CUSTOM" ? -1 : DETECTORS.findIndex((d) => d.id === id));
     for (const m of matches) {
       const also = new Set();
@@ -704,16 +702,31 @@
     const terms = (opts.customTerms || [])
       .map((t) => t.trim())
       .filter((t) => t.length >= 2);
-    const customRe = terms.length
-      ? new RegExp(
-          terms
-            .map(escapeRegex)
-            .sort((a, b) => b.length - a.length)
-            .join("|"),
-          "gi",
-        )
-      : null;
-    if (customRe) out = out.replace(customRe, (m) => record("CUSTOM", m));
+    const termsSource = terms
+      .map(escapeRegex)
+      .sort((a, b) => b.length - a.length)
+      .join("|");
+    const spans = [];
+    let customRe = null;
+    if (terms.length) {
+      // Placeholders are matched first and kept, so a term like "email" can't
+      // break an existing [REDACTED_EMAIL_1].
+      customRe = new RegExp(PLACEHOLDER.source + "|" + termsSource, "gi");
+      for (const m of text.matchAll(new RegExp(termsSource, "gi"))) {
+        spans.push({ id: "CUSTOM", value: m[0], start: m.index, end: m.index + m[0].length });
+      }
+    }
+    const detSpans = spans.length ? detectorSpans(text, opts.overrides) : null;
+    // A custom term inside a larger detected value (acme in jane@acme.com) is
+    // left for that detector, so the whole value is hidden, not just the term.
+    const insideDetected = (start, end) =>
+      detSpans.some((s) => s.start <= start && end <= s.end && s.end - s.start > end - start);
+    const customPass = (fromOriginal) => (m, offset) => {
+      if (PLACEHOLDER_ONLY.test(m)) return m;
+      if (fromOriginal && insideDetected(offset, offset + m.length)) return m;
+      return record("CUSTOM", m);
+    };
+    if (customRe) out = out.replace(customRe, customPass(true));
 
     for (const det of DETECTORS) {
       if (!isEnabled(det, opts.overrides)) continue;
@@ -734,7 +747,9 @@
           .join("");
       });
     }
-    if (matches.length) addAlso(text, matches, customRe, opts.overrides);
+    // Anything left of a custom term (a detector didn't cover it after all).
+    if (customRe) out = out.replace(customRe, customPass(false));
+    if (matches.length) addAlso(matches, spans.concat(detSpans || detectorSpans(text, opts.overrides)));
     return { text: out, findings, matches };
   }
 
