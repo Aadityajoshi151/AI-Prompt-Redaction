@@ -179,6 +179,18 @@ t("disabled detectors are not listed", () =>
   assert.deepStrictEqual(cats("account number: 9876543210", { overrides: { IN_MOBILE: false } }), [["BANK_ACCOUNT", []]]));
 t("wider overlapping matches are not listed", () =>
   assert.deepStrictEqual(cats("mail jane@acme.com", { customTerms: ["acme"] }), [["CUSTOM", []]]));
+t("summary lists main categories, then other matches", () => {
+  const r = R.redact("account number: 9876543210, mail a@b.com, c@d.com");
+  assert.strictEqual(R.summarize(r.findings, r.matches), "bank account, email ×2 · 1 also matched: mobile");
+});
+t("summary without overlaps is unchanged", () => {
+  const r = R.redact("mail a@b.com");
+  assert.strictEqual(R.summarize(r.findings, r.matches), "email");
+});
+t("categories describe one value", () => {
+  const [m] = R.redact("account number: 9876543210").matches;
+  assert.strictEqual(R.categories(m), "bank account (also matches: mobile)");
+});
 t("single-category values have an empty list", () =>
   assert.deepStrictEqual(cats("call 9876543210 or mail a@b.com"), [["EMAIL", []], ["IN_MOBILE", []]]));
 

@@ -52,22 +52,7 @@
   // and never triggers our own MutationObserver.
   function mount(n) { if (!n.isConnected) document.documentElement.appendChild(n); }
 
-  // "bank account, email ×2 · 1 also matched: mobile". Each item counts once,
-  // under the category that named its placeholder; other matches are extra info.
-  function summarize(findings, matches) {
-    const main = Object.entries(findings)
-      .map(([id, n]) => R.shortName(id) + (n > 1 ? " \u00d7" + n : ""))
-      .join(", ");
-    const multi = matches.filter((m) => m.also && m.also.length);
-    if (!multi.length) return main;
-    const also = [...new Set(multi.flatMap((m) => m.also))].map(R.shortName).join(", ");
-    return main + " \u00b7 " + multi.length + " also matched: " + also;
-  }
-  // "bank account (also matches: mobile)"
-  function categories(m) {
-    const also = m.also && m.also.length ? " (also matches: " + m.also.map(R.shortName).join(", ") + ")" : "";
-    return R.shortName(m.id) + also;
-  }
+  const { summarize, categories } = R;
   const plural = (n, word) => n + " " + word + (n === 1 ? "" : "s");
 
   function rangeOf(node, start, end) {

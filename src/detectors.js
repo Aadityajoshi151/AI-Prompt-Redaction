@@ -1,7 +1,8 @@
 /*
  * Detection engine. Runs in the page (MAIN world), the content-script world,
  * the popup, and Node tests.
- * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, redact, shortName }.
+ * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, redact, shortName,
+ * summarize, categories }.
  *
  * A detector with `capture: n` must have its regex fully covered by capture
  * groups (lookarounds aside); only group n is replaced, the rest is kept.
@@ -583,6 +584,24 @@
   for (const d of DETECTORS) SHORT[d.id] = d.short;
   const shortName = (id) => SHORT[id] || id.toLowerCase().replace(/_/g, " ");
 
+  // Wording shared by the on-page UI and the popup preview.
+  // "bank account, email ×2 · 1 also matched: mobile". Each item counts once,
+  // under the category that named its placeholder; other matches are extra info.
+  function summarize(findings, matches) {
+    const main = Object.entries(findings)
+      .map(([id, n]) => shortName(id) + (n > 1 ? " \u00d7" + n : ""))
+      .join(", ");
+    const multi = matches.filter((m) => m.also && m.also.length);
+    if (!multi.length) return main;
+    const also = [...new Set(multi.flatMap((m) => m.also))].map(shortName).join(", ");
+    return main + " \u00b7 " + multi.length + " also matched: " + also;
+  }
+  // "bank account (also matches: mobile)"
+  function categories(m) {
+    const also = m.also && m.also.length ? " (also matches: " + m.also.map(shortName).join(", ") + ")" : "";
+    return shortName(m.id) + also;
+  }
+
   // Same secret -> same placeholder for the whole page session.
   function createContext() {
     return { map: new Map(), counters: Object.create(null) };
@@ -725,6 +744,8 @@
     createContext,
     redact,
     shortName,
+    summarize,
+    categories,
     _luhn: luhn,
     _verhoeff: verhoeff,
   };
