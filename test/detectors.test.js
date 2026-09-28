@@ -159,5 +159,60 @@ const clean = [
 ];
 for (const s of clean) t("clean: " + s.slice(0, 44), () => none(s));
 
+console.log("Values matching several detectors");
+// [id, also] per match: the first detector in array order names the placeholder,
+// the others that match the same value are listed in `also`.
+const cats = (s, o) => R.redact(s, o).matches.map((m) => [m.id, m.also]);
+const allOn = { overrides: Object.fromEntries(R.DETECTORS.map((d) => [d.id, true])) };
+t("labelled bank account beats mobile", () =>
+  assert.deepStrictEqual(cats("account number: 9876543210"), [["BANK_ACCOUNT", ["IN_MOBILE"]]]));
+t("labelled bank account beats Aadhaar", () =>
+  assert.deepStrictEqual(cats("A/C No. 987654321012"), [["BANK_ACCOUNT", ["AADHAAR"]]]));
+t("GitHub token beats generic secret value", () =>
+  assert.deepStrictEqual(cats("token: ghp_" + "a1".repeat(18)), [["GITHUB_TOKEN", ["SECRET_ASSIGNMENT"]]]));
+t("URL secret beats generic secret value", () =>
+  assert.deepStrictEqual(cats("https://x.com/cb?token=abcdEFGH12345678"), [["URL_QUERY_SECRET", ["SECRET_ASSIGNMENT"]]]));
+t("AWS secret beats random string", () =>
+  assert.deepStrictEqual(cats("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", allOn),
+    [["AWS_SECRET_KEY", ["HIGH_ENTROPY"]]]));
+t("disabled detectors are not listed", () =>
+  assert.deepStrictEqual(cats("account number: 9876543210", { overrides: { IN_MOBILE: false } }), [["BANK_ACCOUNT", []]]));
+
+t("summary lists main categories, then other matches", () => {
+  const r = R.redact("account number: 9876543210, mail a@b.com, c@d.com");
+  assert.strictEqual(R.summarize(r.findings, r.matches), "bank account, email ×2 · 1 also matched: mobile");
+});
+t("summary without overlaps is unchanged", () => {
+  const r = R.redact("mail a@b.com");
+  assert.strictEqual(R.summarize(r.findings, r.matches), "email");
+});
+t("categories describe one value", () => {
+  const [m] = R.redact("account number: 9876543210").matches;
+  assert.strictEqual(R.categories(m), "bank account (also matches: mobile)");
+});
+t("single-category values have an empty list", () =>
+  assert.deepStrictEqual(cats("call 9876543210 or mail a@b.com"), [["EMAIL", []], ["IN_MOBILE", []]]));
+
+console.log("Custom terms and detected values");
+const acme = { customTerms: ["acme"] };
+t("custom term inside a detected value: whole value is redacted", () => {
+  assert.strictEqual(red("mail jane@acme.com", acme), "mail [REDACTED_EMAIL_1]");
+  assert.deepStrictEqual(cats("mail jane@acme.com", acme), [["EMAIL", ["CUSTOM"]]]);
+});
+t("custom term inside a key doesn't leave the rest of the key", () =>
+  assert.strictEqual(red("key AKIAIOSFODNN7EXAMPLE here", { customTerms: ["example"] }), "key [REDACTED_AWS_ACCESS_KEY_1] here"));
+t("standalone custom term still wins", () =>
+  assert.strictEqual(red("Acme called from jane@acme.com", acme), "[REDACTED_CUSTOM_1] called from [REDACTED_EMAIL_1]"));
+t("custom term equal to a detected value keeps its own placeholder", () =>
+  assert.deepStrictEqual(cats("reach me at jane@acme.com", { customTerms: ["jane@acme.com"] }), [["CUSTOM", ["EMAIL"]]]));
+t("custom term containing a detected value is redacted whole", () => {
+  assert.strictEqual(red("re Acme deal 9876543210 today", { customTerms: ["Acme deal 9876543210"] }), "re [REDACTED_CUSTOM_1] today");
+  assert.deepStrictEqual(cats("re Acme deal 9876543210 today", { customTerms: ["Acme deal 9876543210"] }), [["CUSTOM", ["IN_MOBILE"]]]);
+});
+t("custom term is still redacted when its detector is off", () =>
+  assert.strictEqual(red("mail jane@acme.com", { customTerms: ["acme"], overrides: { EMAIL: false } }), "mail jane@[REDACTED_CUSTOM_1].com"));
+t("custom term doesn't break existing placeholders", () =>
+  assert.strictEqual(red("see [REDACTED_EMAIL_1] and my email", { customTerms: ["email"] }), "see [REDACTED_EMAIL_1] and my [REDACTED_CUSTOM_1]"));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,7 +1,8 @@
 /*
  * Detection engine. Runs in the page (MAIN world), the content-script world,
  * the popup, and Node tests.
- * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, redact, shortName }.
+ * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, redact, shortName,
+ * summarize, categories }.
  *
  * A detector with `capture: n` must have its regex fully covered by capture
  * groups (lookarounds aside); only group n is replaced, the rest is kept.
@@ -583,6 +584,24 @@
   for (const d of DETECTORS) SHORT[d.id] = d.short;
   const shortName = (id) => SHORT[id] || id.toLowerCase().replace(/_/g, " ");
 
+  // Wording shared by the on-page UI and the popup preview.
+  // "bank account, email ×2 · 1 also matched: mobile". Each item counts once,
+  // under the category that named its placeholder; other matches are extra info.
+  function summarize(findings, matches) {
+    const main = Object.entries(findings)
+      .map(([id, n]) => shortName(id) + (n > 1 ? " \u00d7" + n : ""))
+      .join(", ");
+    const multi = matches.filter((m) => m.also && m.also.length);
+    if (!multi.length) return main;
+    const also = [...new Set(multi.flatMap((m) => m.also))].map(shortName).join(", ");
+    return main + " \u00b7 " + multi.length + " also matched: " + also;
+  }
+  // "bank account (also matches: mobile)"
+  function categories(m) {
+    const also = m.also && m.also.length ? " (also matches: " + m.also.map(shortName).join(", ") + ")" : "";
+    return shortName(m.id) + also;
+  }
+
   // Same secret -> same placeholder for the whole page session.
   function createContext() {
     return { map: new Map(), counters: Object.create(null) };
@@ -609,9 +628,57 @@
       : det.defaultOn;
   }
 
+  const PLACEHOLDER = /\[REDACTED_[A-Z0-9_]+?_\d+\]/;
+  const PLACEHOLDER_ONLY = /^\[REDACTED_[A-Z0-9_]+?_\d+\]$/;
+
+  // Copies of detector regexes with the `d` flag, for match positions.
+  const INDEXED = new Map();
+  function indexed(det) {
+    let re = INDEXED.get(det.id);
+    if (!re) INDEXED.set(det.id, (re = new RegExp(det.regex.source, det.regex.flags + "d")));
+    return re;
+  }
+
+  // Every match of every enabled detector in the original text, as spans.
+  // Read-only: used to place custom terms and to find the other categories a
+  // redacted value falls into.
+  function detectorSpans(text, overrides) {
+    const spans = [];
+    for (const det of DETECTORS) {
+      if (!isEnabled(det, overrides)) continue;
+      const g = det.capture || 0;
+      for (const m of text.matchAll(indexed(det))) {
+        const secret = m[g];
+        if (!secret || secret.indexOf("REDACTED_") !== -1) continue;
+        if (det.validate && !det.validate(secret)) continue;
+        spans.push({ id: det.id, value: secret, start: m.indices[g][0], end: m.indices[g][1] });
+      }
+    }
+    return spans;
+  }
+
+  // For each redacted value, the other detectors whose whole match lies inside
+  // it. Wider overlapping matches are left out: the part outside the redacted
+  // value was sent, so "also matches" would overstate what was hidden.
+  function addAlso(matches, spans) {
+    const order = (id) => (id === "CUSTOM" ? -1 : DETECTORS.findIndex((d) => d.id === id));
+    for (const m of matches) {
+      const also = new Set();
+      for (const own of spans) {
+        if (own.id !== m.id || own.value !== m.value) continue;
+        for (const o of spans) {
+          if (o.id !== m.id && o.start >= own.start && o.end <= own.end) also.add(o.id);
+        }
+      }
+      m.also = [...also].sort((a, b) => order(a) - order(b));
+    }
+  }
+
   /**
+   * Detectors run in array order; the first to match a value names its
+   * placeholder. `also` lists the other categories the value falls into.
    * @returns {{text: string, findings: Object<string, number>,
-   *            matches: Array<{id: string, value: string, placeholder: string}>}}
+   *            matches: Array<{id: string, value: string, placeholder: string, also: string[]}>}}
    */
   function redact(text, opts) {
     opts = opts || {};
@@ -635,16 +702,31 @@
     const terms = (opts.customTerms || [])
       .map((t) => t.trim())
       .filter((t) => t.length >= 2);
+    const termsSource = terms
+      .map(escapeRegex)
+      .sort((a, b) => b.length - a.length)
+      .join("|");
+    const spans = [];
+    let customRe = null;
     if (terms.length) {
-      const re = new RegExp(
-        terms
-          .map(escapeRegex)
-          .sort((a, b) => b.length - a.length)
-          .join("|"),
-        "gi",
-      );
-      out = out.replace(re, (m) => record("CUSTOM", m));
+      // Placeholders are matched first and kept, so a term like "email" can't
+      // break an existing [REDACTED_EMAIL_1].
+      customRe = new RegExp(PLACEHOLDER.source + "|" + termsSource, "gi");
+      for (const m of text.matchAll(new RegExp(termsSource, "gi"))) {
+        spans.push({ id: "CUSTOM", value: m[0], start: m.index, end: m.index + m[0].length });
+      }
     }
+    const detSpans = spans.length ? detectorSpans(text, opts.overrides) : null;
+    // A custom term inside a larger detected value (acme in jane@acme.com) is
+    // left for that detector, so the whole value is hidden, not just the term.
+    const insideDetected = (start, end) =>
+      detSpans.some((s) => s.start <= start && end <= s.end && s.end - s.start > end - start);
+    const customPass = (fromOriginal) => (m, offset) => {
+      if (PLACEHOLDER_ONLY.test(m)) return m;
+      if (fromOriginal && insideDetected(offset, offset + m.length)) return m;
+      return record("CUSTOM", m);
+    };
+    if (customRe) out = out.replace(customRe, customPass(true));
 
     for (const det of DETECTORS) {
       if (!isEnabled(det, opts.overrides)) continue;
@@ -665,6 +747,9 @@
           .join("");
       });
     }
+    // Anything left of a custom term (a detector didn't cover it after all).
+    if (customRe) out = out.replace(customRe, customPass(false));
+    if (matches.length) addAlso(matches, spans.concat(detSpans || detectorSpans(text, opts.overrides)));
     return { text: out, findings, matches };
   }
 
@@ -674,6 +759,8 @@
     createContext,
     redact,
     shortName,
+    summarize,
+    categories,
     _luhn: luhn,
     _verhoeff: verhoeff,
   };

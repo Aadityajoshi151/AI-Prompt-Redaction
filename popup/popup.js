@@ -137,12 +137,15 @@
   });
 
   // Live test preview
+  const summary = $("preview-summary");
   function renderPreview() {
     const out = $("preview");
     out.textContent = "";
+    summary.textContent = "";
     const src = $("test").value;
     if (!src) return;
-    const { text } = R.redact(src, { overrides: settings.overrides, customTerms: settings.customTerms });
+    const { text, findings, matches } = R.redact(src, { overrides: settings.overrides, customTerms: settings.customTerms });
+    const byPlaceholder = new Map(matches.map((m) => [m.placeholder, m]));
     for (const part of text.split(/(\[REDACTED_[A-Z0-9_]+?_\d+\])/)) {
       if (!part) continue;
       const m = part.match(/^\[REDACTED_([A-Z0-9_]+?)_\d+\]$/);
@@ -150,10 +153,13 @@
         const s = document.createElement("span");
         s.className = "bar";
         s.textContent = R.shortName(m[1]);
-        s.title = part;
+        const match = byPlaceholder.get(part);
+        s.title = (match ? R.categories(match) + ": " : "") + part;
         out.appendChild(s);
       } else out.appendChild(document.createTextNode(part));
     }
+    // Same summary as the on-page label, including other matched categories.
+    summary.textContent = matches.length ? R.summarize(findings, matches) : "";
   }
   $("test").addEventListener("input", renderPreview);
 })();
