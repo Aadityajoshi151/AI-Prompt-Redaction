@@ -31,6 +31,7 @@ function makePage(settings) {
     },
     Request, URL, JSON, console, Object, Array, Set, Map, Math, Promise, String, Date, setTimeout, clearTimeout,
     Symbol, Blob, Response, ReadableStream, TextEncoder, TextDecoder, CompressionStream, DecompressionStream,
+    Uint8Array, DataView, Error,
     XMLHttpRequest: FakeXHR,
     // Content-script side: extension storage and the on-page indicator.
     chrome: { storage: {
@@ -109,6 +110,79 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   xhr("POST", url, '{"prompt":"a@b.com"}', false);
   assert.deepStrictEqual(page.xhrSent.slice(1), Array(3).fill('{"prompt":"a@b.com"}'),
     "GET, other origins and synchronous XHRs pass through unchanged");
+
+  // ---------- Protocol Buffers over /claudeai-rpc/ (claude.ai's newer transport) ----------
+  // Minimal encoder/decoder, independent of the one in interceptor.js.
+  const vint = (n) => { const o = []; while (n > 127) { o.push((n & 127) | 128); n = Math.floor(n / 128); } o.push(n); return Buffer.from(o); };
+  const str = (field, v) => { const b = Buffer.isBuffer(v) ? v : Buffer.from(v); return Buffer.concat([vint(field * 8 + 2), vint(b.length), b]); };
+  const num = (field, n) => Buffer.concat([vint(field * 8), vint(n)]);
+  const f32 = (field) => Buffer.concat([vint(field * 8 + 5), Buffer.from([1, 2, 3, 4])]);
+  const msg = (...parts) => Buffer.concat(parts);
+  // Decodes one level: { fieldNumber: [values...] }, length-delimited values as Buffers.
+  const dec = (buf) => {
+    const out = {}; let i = 0;
+    const rv = () => { let v = 0, sh = 0, b; do { b = buf[i++]; v += (b & 127) * 2 ** sh; sh += 7; } while (b & 128); return v; };
+    while (i < buf.length) {
+      const tag = rv(), field = Math.floor(tag / 8), wire = tag % 8;
+      let v;
+      if (wire === 0) v = rv();
+      else if (wire === 5) { v = buf.subarray(i, i + 4); i += 4; }
+      else { const len = rv(); v = buf.subarray(i, i + len); i += len; }
+      (out[field] = out[field] || []).push(v);
+    }
+    assert.strictEqual(i, buf.length, "decodes to exactly the end");
+    return out;
+  };
+  const rpc = "/claudeai-rpc/anthropic.bard.api.v1alpha.ConversationService/PerformAction";
+  const ID1 = "66c882d2-8745-4b1f-bfed-6ae4bbd3f9b3", ID2 = "550e8400-e29b-41d4-a716-446655440000";
+  const blob = Buffer.from(Array.from({ length: 32 }, (_, k) => 200 + (k % 50))); // not valid UTF-8
+  const header = str(1, msg(str(1, msg(str(1, "claude-sonnet-4-5-xyz"), num(2, 1))), str(2, ID1), num(3, 1),
+    str(7, msg(num(1, 1), num(2, 0), num(10, 1))), str(14, f32(12)), str(15, blob)));
+  const action = (text, attachment) => new Uint8Array(msg(header, str(2, msg(str(1, ID1), str(2, ID2), str(3, text),
+    str(12, "Asia/Calcutta"), str(13, f32(12)), ...(attachment ? [str(15, msg(num(2, 1), str(3, "txt"), str(4, attachment)))] : []), num(18, 1)))));
+  const sendRpc = async (body, u) => { sent.length = 0; await post(win, u || rpc, body); return sent[0]; };
+  const text = (b) => Buffer.from(b).toString();
+
+  let out = dec(Buffer.from(await sendRpc(action("please mail me at a@b.com about it"))));
+  let m = dec(out[2][0]);
+  assert.strictEqual(text(m[3][0]), "please mail me at [REDACTED_EMAIL_1] about it", "protobuf: message text redacted");
+  assert.deepStrictEqual([text(m[1][0]), text(m[2][0]), text(m[12][0]), m[18][0]], [ID1, ID2, "Asia/Calcutta", 1], "ids and other fields untouched");
+  assert.ok(Buffer.from(out[1][0]).equals(header.subarray(2)), "unrelated message copied byte for byte");
+
+  const fileText = "notes\n".repeat(40) + "contact jane@acme.com or account number: 9876543210\n" + "more\n".repeat(40);
+  out = dec(Buffer.from(await sendRpc(action("see the attached file", fileText))));
+  m = dec(out[2][0]);
+  const file = dec(m[15][0]);
+  assert.strictEqual(text(m[3][0]), "see the attached file");
+  assert.strictEqual(text(file[4][0]), fileText.replace("jane@acme.com", "[REDACTED_EMAIL_2]").replace("9876543210", "[REDACTED_BANK_ACCOUNT_1]"),
+    "protobuf: attachment text redacted, lengths re-encoded");
+  assert.strictEqual(text(file[3][0]), "txt");
+
+  const untouched = action("nothing to hide here");
+  assert.strictEqual(await sendRpc(untouched), untouched, "protobuf: unchanged bodies are sent as the same object");
+
+  // Nested messages made only of printable bytes (field 4, lengths over 31)
+  // read as text; they must still be handled as messages, or their lengths break.
+  const wrapped = new Uint8Array(msg(str(2, msg(str(4, msg(str(1, "this block of text mentions a@b.com somewhere inside")))))));
+  out = dec(dec(dec(Buffer.from(await sendRpc(wrapped)))[2][0])[4][0]);
+  assert.strictEqual(text(out[1][0]), "this block of text mentions [REDACTED_EMAIL_1] somewhere inside", "protobuf: string wrapper message");
+
+  // Connect streaming envelope: flag byte + 4-byte length, plain and gzip.
+  const envelope = (flag, payload) => { const b = Buffer.alloc(5 + payload.length); b[0] = flag; b.writeUInt32BE(payload.length, 1); payload.copy(b, 5); return new Uint8Array(b); };
+  const inner = Buffer.from(action("streamed a@b.com"));
+  let env = Buffer.from(await sendRpc(envelope(0, inner)));
+  assert.strictEqual(env.readUInt32BE(1), env.length - 5, "envelope length updated");
+  assert.strictEqual(text(dec(dec(env.subarray(5))[2][0])[3][0]), "streamed [REDACTED_EMAIL_1]", "protobuf in a plain envelope");
+  env = Buffer.from(await sendRpc(envelope(1, zlib.gzipSync(inner))));
+  assert.strictEqual(env[0], 1, "compressed envelope stays compressed");
+  assert.strictEqual(text(dec(dec(zlib.gunzipSync(env.subarray(5)))[2][0])[3][0]), "streamed [REDACTED_EMAIL_1]", "protobuf in a gzip envelope");
+
+  // Short text that happens to parse as a message ("P1" = field 10, varint 49) stays text.
+  out = dec(Buffer.from(await sendRpc(new Uint8Array(msg(str(3, "P1"), str(4, "mail a@b.com"))))));
+  assert.deepStrictEqual([text(out[3][0]), text(out[4][0])], ["P1", "mail [REDACTED_EMAIL_1]"], "protobuf: text that looks like a message");
+
+  const onApi = action("mail a@b.com");
+  assert.strictEqual(await sendRpc(onApi, url), onApi, "binary bodies outside /claudeai-rpc/ are left alone");
 
   // ---------- settings come from the content script ----------
   const custom = makePage({ customTerms: ["Project Falcon"], overrides: { EMAIL: false } });
