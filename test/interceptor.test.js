@@ -38,7 +38,7 @@ function makePage(settings) {
       sync: { get: async (d) => ({ ...d, ...settings }) },
       local: { get: async () => ({}), set: async () => {} },
       onChanged: { addListener() {} } } },
-    PromptRedactionUI: { setSettings() {}, onRedacted: (findings, matches) => toasts.push({ findings, matches }) },
+    PromptRedactionUI: { setSettings() {}, onOutgoing() {}, onRedacted: (findings, matches) => toasts.push({ findings, matches }) },
   };
   win.window = win; win.globalThis = win;
   const ctx = vm.createContext(win);

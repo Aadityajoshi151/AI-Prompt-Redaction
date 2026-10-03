@@ -37,14 +37,18 @@
   // or null when redaction is off or nothing was found.
   async function redactAll(strings) {
     await loaded;
-    if (!settings.enabled || !Array.isArray(strings)) return null;
+    if (!Array.isArray(strings)) return null;
+    strings = strings.map(String);
     const findings = {}, matches = [];
-    const texts = strings.map((s) => {
-      const res = R.redact(String(s), { overrides: settings.overrides, customTerms: settings.customTerms, ctx });
+    const texts = !settings.enabled ? strings : strings.map((s) => {
+      const res = R.redact(s, { overrides: settings.overrides, customTerms: settings.customTerms, ctx });
       for (const k in res.findings) findings[k] = (findings[k] || 0) + res.findings[k];
       matches.push(...res.matches);
       return res.text;
     });
+    // Tell the indicator what is actually leaving the browser, so it can stop
+    // marking a value "not sent" once that value goes out unredacted.
+    UI.onOutgoing(texts);
     if (!matches.length) return null;
     onRedacted(findings, matches);
     return texts;
