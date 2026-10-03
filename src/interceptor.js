@@ -78,9 +78,11 @@
 
   // Returns the new body string, or null if nothing changed.
   // Debug only: what was changed in a request (where, how long the text was,
-  // and which placeholders went in). Never the text itself.
+  // and which kinds of placeholder went in). Never the text itself.
   const noteChange = (log, where, before, after) => {
-    if (log && before !== after) log.push({ where, length: before.length, placeholders: after.match(/\[REDACTED_[A-Z0-9_]+?_\d+\]/g) || [] });
+    if (!log || before === after) return;
+    const types = [...after.matchAll(/\[REDACTED_([A-Z0-9_]+?)_[0-9a-f]{6}\]/g)].map((m) => m[1]);
+    log.push({ where, length: before.length, redacted: types });
   };
 
   async function redactBody(body, log) {

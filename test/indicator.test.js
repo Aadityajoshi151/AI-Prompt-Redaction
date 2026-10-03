@@ -17,7 +17,11 @@ Object.defineProperty(w.HTMLElement.prototype, "innerText", { get() { return thi
 w.Range.prototype.getClientRects = () => [];
 w.Range.prototype.toString = function () { return this.startContainer.data.slice(this.startOffset, this.endOffset); };
 
-const store = { sync: {}, local: {} };
+// A fixed placeholder key, so the test knows which placeholders to expect.
+const KEY = "ab".repeat(32);
+const ph = (type, value) => "[REDACTED_" + type + "_" +
+  require("crypto").createHmac("sha256", Buffer.from(KEY, "hex")).update(value).digest("hex").slice(0, 6) + "]";
+const store = { sync: {}, local: { tagKey: KEY } };
 w.chrome = { storage: {
   sync: { get: async (d) => ({ ...d, ...store.sync }), set: async (o) => Object.assign(store.sync, o) },
   local: { get: async () => store.local, set: async (o) => Object.assign(store.local, o) },
@@ -54,10 +58,11 @@ const post = (data) => w.dispatchEvent(new w.MessageEvent("message", { data, sou
   assert.strictEqual(store.local.stats.total, 2);
 
   const reply = w.document.createElement("p");
-  reply.textContent = "I'll email [REDACTED_EMAIL_1] about [REDACTED_BANK_ACCOUNT_1].";
+  const emailPh = ph("EMAIL", "jane@acme.com"), accountPh = ph("BANK_ACCOUNT", "9876543210");
+  reply.textContent = "I'll email " + emailPh + " about " + accountPh + ".";
   w.document.getElementById("chat").appendChild(reply);
   await wait(600);
-  assert.deepStrictEqual(marked("apr-placeholder"), ["[REDACTED_BANK_ACCOUNT_1]", "[REDACTED_EMAIL_1]"]);
+  assert.deepStrictEqual(marked("apr-placeholder"), [accountPh, emailPh].sort());
 
   // The detector is switched off and the same value is sent again: it goes out
   // unredacted, so the page must stop marking it "not sent".

@@ -12,8 +12,13 @@
   const api = globalThis.browser ?? globalThis.chrome;
   const R = globalThis.PromptRedaction;
   const UI = globalThis.PromptRedactionUI;
-  // Same value -> same placeholder for the whole page session.
-  const ctx = R.createContext();
+  // Placeholder tags are computed with this browser's saved key, so the same
+  // value gets the same placeholder in every chat and after a reload. If the
+  // key can't be read, a temporary one keeps them consistent for this page.
+  let ctx = R.createContext();
+  const keyLoaded = R.loadKey(api.storage.local).then(
+    (key) => { ctx = R.createContext(key); },
+    (err) => console.warn("[AI Prompt Redaction] couldn't read the placeholder key, using a temporary one:", err));
 
   let settings = DEFAULTS;
   async function loadSettings() {
@@ -37,6 +42,7 @@
   // or null when redaction is off or nothing was found.
   async function redactAll(strings) {
     await loaded;
+    await keyLoaded;
     if (!Array.isArray(strings)) return null;
     strings = strings.map(String);
     const findings = {}, matches = [];

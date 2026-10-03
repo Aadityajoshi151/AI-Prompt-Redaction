@@ -11,7 +11,19 @@ const load = (ctx, files) => {
 // A fake page: fetch records what would be sent; postMessage is delivered
 // asynchronously to every listener, like window.postMessage in a browser.
 // Both worlds share it here, as they share window.postMessage in a real tab.
-function makePage(settings) {
+// Placeholders carry a keyed tag ([REDACTED_EMAIL_3e1a38]). For readable
+// assertions, a numberer renames them per type in order of appearance (_1, _2, ...).
+const numberer = () => {
+  const seen = {};
+  return (text) => text.replace(/\[REDACTED_([A-Z0-9_]+?)_([0-9a-f]{6})\]/g, (_, type, tag) => {
+    const tags = (seen[type] = seen[type] || []);
+    if (!tags.includes(tag)) tags.push(tag);
+    return "[REDACTED_" + type + "_" + (tags.indexOf(tag) + 1) + "]";
+  });
+};
+
+// `disk` stands for the extension's storage.local, where the placeholder key is saved.
+function makePage(settings, disk = {}) {
   const sent = [], toasts = [], listeners = [], xhrSent = [];
   // Stand-in for the browser's XMLHttpRequest: records what send() receives.
   class FakeXHR {
@@ -30,13 +42,13 @@ function makePage(settings) {
       return { ok: true };
     },
     Request, URL, JSON, console, Object, Array, Set, Map, Math, Promise, String, Date, setTimeout, clearTimeout,
-    Symbol, Blob, Response, ReadableStream, TextEncoder, TextDecoder, CompressionStream, DecompressionStream,
+    crypto: globalThis.crypto, Symbol, Blob, Response, ReadableStream, TextEncoder, TextDecoder, CompressionStream, DecompressionStream,
     Uint8Array, DataView, Error,
     XMLHttpRequest: FakeXHR,
     // Content-script side: extension storage and the on-page indicator.
     chrome: { storage: {
       sync: { get: async (d) => ({ ...d, ...settings }) },
-      local: { get: async () => ({}), set: async () => {} },
+      local: { get: async () => disk, set: async (o) => { Object.assign(disk, o); } },
       onChanged: { addListener() {} } } },
     PromptRedactionUI: { setSettings() {}, onOutgoing() {}, onRedacted: (findings, matches) => toasts.push({ findings, matches }) },
   };
@@ -69,11 +81,12 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   await post(win, "https://elsewhere.com/api/x", '{"prompt":"a@b.com"}');
   await post(win, url, '{"prompt":"nothing to hide"}');
 
-  const first = JSON.parse(sent[0]);
+  const n = numberer();
+  const first = JSON.parse(n(sent[0]));
   assert.strictEqual(first.prompt, "my key is [REDACTED_ANTHROPIC_KEY_1], mail me at [REDACTED_EMAIL_1]");
   assert.strictEqual(first.attachments[0].extracted_content, "DB_PASSWORD=[REDACTED_SECRET_ASSIGNMENT_1]");
   assert.strictEqual(first.parent_message_uuid, "550e8400-e29b-41d4-a716-446655440000", "ids untouched");
-  assert.strictEqual(JSON.parse(sent[1]).prompt, "again [REDACTED_EMAIL_1]", "Request objects + stable placeholders");
+  assert.strictEqual(JSON.parse(n(sent[1])).prompt, "again [REDACTED_EMAIL_1]", "Request objects + same value, same placeholder");
   assert.strictEqual(sent[2], null, "GET passes through");
   assert.strictEqual(sent[3], '{"prompt":"a@b.com"}', "other origins untouched");
   assert.strictEqual(sent[4], '{"prompt":"nothing to hide"}', "nothing found: body unchanged");
@@ -81,13 +94,13 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   assert.strictEqual(toasts.length, 2, "the content script shows a toast per redacted request");
   // JSON round-trip: objects from the vm sandbox have a different Object.prototype
   assert.deepStrictEqual(JSON.parse(JSON.stringify(toasts[0].findings)), { ANTHROPIC_KEY: 1, EMAIL: 1, SECRET_ASSIGNMENT: 1 });
-  assert.ok(toasts[0].matches.some((m) => m.value === "a@b.com" && m.placeholder === "[REDACTED_EMAIL_1]"));
+  assert.ok(toasts[0].matches.some((m) => m.value === "a@b.com" && n(m.placeholder) === "[REDACTED_EMAIL_1]"));
 
   // ---------- gzip, binary and stream bodies (claude.ai gzips larger requests) ----------
   const withFile = (extra) => JSON.stringify({ prompt: "see file",
     attachments: [{ file_name: "notes.txt", extracted_content: "contact jane@acme.com" + (extra || "") }] });
   const gz = (text) => new Uint8Array(zlib.gzipSync(text));
-  const attachmentOf = (buf) => JSON.parse(zlib.gunzipSync(Buffer.from(buf)).toString()).attachments[0].extracted_content;
+  const attachmentOf = (buf) => n(JSON.parse(zlib.gunzipSync(Buffer.from(buf)).toString()).attachments[0].extracted_content);
   sent.length = 0; toasts.length = 0;
 
   await post(win, url, gz(withFile()));
@@ -95,7 +108,7 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   await post(win, url, new Blob([gz(withFile(" again"))]));
   assert.strictEqual(attachmentOf(sent[1]), "contact [REDACTED_EMAIL_2] again", "gzip Blob");
   await post(win, url, new TextEncoder().encode(withFile()));
-  assert.match(new TextDecoder().decode(sent[2]), /contact \[REDACTED_EMAIL_2\]/, "plain bytes");
+  assert.match(n(new TextDecoder().decode(sent[2])), /contact \[REDACTED_EMAIL_2\]/, "plain bytes");
   await win.fetch(url, { method: "POST", body: new Blob([gz(withFile())]).stream(), duplex: "half" });
   assert.strictEqual(attachmentOf(sent[3]), "contact [REDACTED_EMAIL_2]", "gzip stream");
   const clean = gz('{"prompt":"nothing to hide"}');
@@ -147,7 +160,7 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   const action = (text, attachment) => new Uint8Array(msg(header, str(2, msg(str(1, ID1), str(2, ID2), str(3, text),
     str(12, "Asia/Calcutta"), str(13, f32(12)), ...(attachment ? [str(15, msg(num(2, 1), str(3, "txt"), str(4, attachment)))] : []), num(18, 1)))));
   const sendRpc = async (body, u) => { sent.length = 0; await post(win, u || rpc, body); return sent[0]; };
-  const text = (b) => Buffer.from(b).toString();
+  const text = (b) => n(Buffer.from(b).toString());
 
   let out = dec(Buffer.from(await sendRpc(action("please mail me at a@b.com about it"))));
   let m = dec(out[2][0]);
@@ -194,13 +207,29 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   const custom = makePage({ customTerms: ["Project Falcon"], overrides: { EMAIL: false } });
   load(custom.ctx, ["src/interceptor.js", "src/detectors.js", "src/bridge.js"]);
   await post(custom.win, url, '{"prompt":"project falcon update for a@b.com"}');
-  assert.strictEqual(JSON.parse(custom.sent[0]).prompt, "[REDACTED_CUSTOM_1] update for a@b.com", "custom terms and switches apply");
+  assert.strictEqual(JSON.parse(numberer()(custom.sent[0])).prompt, "[REDACTED_CUSTOM_1] update for a@b.com", "custom terms and switches apply");
 
   const off = makePage({ enabled: false });
   load(off.ctx, ["src/interceptor.js", "src/detectors.js", "src/bridge.js"]);
   await post(off.win, url, '{"prompt":"a@b.com"}');
   assert.strictEqual(off.sent[0], '{"prompt":"a@b.com"}', "redaction switched off");
   assert.strictEqual(off.toasts.length, 0);
+
+  // ---------- placeholders survive a reload: the key is saved, not the values ----------
+  const disk = {};
+  const sendOn = async (pg) => {
+    load(pg.ctx, ["src/interceptor.js", "src/detectors.js", "src/bridge.js"]);
+    await post(pg.win, url, '{"prompt":"mail a@b.com"}');
+    return JSON.parse(pg.sent[0]).prompt;
+  };
+  const beforeReload = await sendOn(makePage({}, disk));
+  assert.match(beforeReload, /^mail \[REDACTED_EMAIL_[0-9a-f]{6}\]$/);
+  assert.match(disk.tagKey, /^[0-9a-f]{64}$/, "a key was created and saved");
+  await until(() => disk.stats);
+  assert.deepStrictEqual(Object.keys(disk).sort(), ["stats", "tagKey"], "only the key and the redaction count are saved");
+  assert.ok(!JSON.stringify(disk).includes("a@b.com"), "no redacted value is saved");
+  assert.strictEqual(await sendOn(makePage({}, disk)), beforeReload, "same placeholder after a reload");
+  assert.notStrictEqual(await sendOn(makePage({}, {})), beforeReload, "another browser, another key: different placeholder");
 
   // ---------- the page script loads before the content script ----------
   const late = makePage({});
@@ -209,7 +238,7 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   await new Promise((r) => setTimeout(r, 20));
   load(late.ctx, ["src/detectors.js", "src/bridge.js"]);
   await pendingSend;
-  assert.strictEqual(JSON.parse(late.sent[0]).prompt, "[REDACTED_EMAIL_1]", "waits for the content script to start");
+  assert.strictEqual(JSON.parse(numberer()(late.sent[0])).prompt, "[REDACTED_EMAIL_1]", "waits for the content script to start");
 
   // ---------- no content script at all: fail open after the timeout ----------
   const alone = makePage({});
