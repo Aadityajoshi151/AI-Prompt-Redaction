@@ -32,6 +32,14 @@ textarea:focus-visible, input:focus-visible + .track { outline: 2px solid var(--
 }
 .preview:empty, .preview-summary:empty { display: none; }
 .preview-summary { margin: 6px 0 0; font-size: 12px; }
+.foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 12px;
+}
+.foot-links { display: flex; gap: 12px; }
+.foot a { color: var(--ink); text-underline-offset: 3px; text-decoration-color: var(--marker); text-decoration-thickness: 2px; }
+.foot a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 .field-hint { margin: 6px 0 0; font-size: 12px; }
 /* Shown only while the master switch is off */
 .off-note { display: none; margin: 8px 0 0; font-size: 12px; }
