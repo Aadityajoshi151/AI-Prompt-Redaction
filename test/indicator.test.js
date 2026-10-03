@@ -43,13 +43,13 @@ const post = (data) => w.dispatchEvent(new w.MessageEvent("message", { data, sou
   assert.strictEqual(pill.parentNode, w.document.documentElement, "UI mounted outside <body>");
   assert.deepStrictEqual(marked("apr-pending"), ["AKIAIOSFODNN7EXAMPLE", "db.prod.internal"]);
 
-  post({ tag: "__prompt_redaction__", type: "redacted", findings: { EMAIL: 1, BANK_ACCOUNT: 1 },
-    matches: [{ id: "EMAIL", value: "jane@acme.com", placeholder: "[REDACTED_EMAIL_1]", also: [] },
-              { id: "BANK_ACCOUNT", value: "9876543210", placeholder: "[REDACTED_BANK_ACCOUNT_1]", also: ["IN_MOBILE"] }] });
+  // What interceptor.js sends when a message goes out; bridge.js redacts it and shows the toast.
+  post({ tag: "__prompt_redaction__", type: "redact", id: "t1",
+    strings: ["my email is jane@acme.com, account number 9876543210"] });
   await wait(600);
   const toastText = w.document.querySelector(".apr-toast").textContent;
   assert.match(toastText, /Redacted 2 items before sending/);
-  assert.match(toastText, /email, bank account \u00b7 1 also matched: mobile/, "other categories shown");
+  assert.match(toastText, /bank account, email \u00b7 1 also matched: mobile/, "other categories shown");
   assert.deepStrictEqual(marked("apr-sent"), ["9876543210", "jane@acme.com"]);
   assert.strictEqual(store.local.stats.total, 2);
 
