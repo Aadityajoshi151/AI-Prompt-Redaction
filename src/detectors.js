@@ -1,8 +1,8 @@
 /*
  * Detection engine. Runs in the page (MAIN world), the content-script world,
  * the popup, and Node tests.
- * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, redact, shortName,
- * summarize, categories }.
+ * Exposes globalThis.PromptRedaction = { SECTIONS, DETECTORS, createContext, loadKey, redact,
+ * shortName, summarize, categories, PLACEHOLDER_SOURCE }.
  *
  * A detector with `capture: n` must have its regex fully covered by capture
  * groups (lookarounds aside); only group n is replaced, the rest is kept.
@@ -602,18 +602,129 @@
     return shortName(m.id) + also;
   }
 
-  // Same secret -> same placeholder for the whole page session.
-  function createContext() {
-    return { map: new Map(), counters: Object.create(null) };
+  // ---------- placeholder tags ----------
+  // A placeholder is [REDACTED_<TYPE>_<tag>]. The tag is the first 6 hex
+  // characters of HMAC-SHA-256(key, value), so the same value gets the same
+  // placeholder in every chat and after a reload or restart, without storing
+  // any values. The key is random, made once per browser (see loadKey), and
+  // never leaves it: without the key a tag says nothing about the value.
+  // SHA-256 is implemented here because redact() is synchronous and shared by
+  // the page, the popup and the Node tests; crypto.subtle is async.
+  const TAG_LENGTH = 6;
+  const SHA_K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ]);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+
+  function sha256(bytes) {
+    const h = new Uint32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+    const len = bytes.length;
+    const total = Math.ceil((len + 9) / 64) * 64;
+    const msg = new Uint8Array(total);
+    msg.set(bytes);
+    msg[len] = 0x80;
+    const view = new DataView(msg.buffer);
+    view.setUint32(total - 8, Math.floor(len / 0x20000000));
+    view.setUint32(total - 4, (len * 8) >>> 0);
+    const w = new Uint32Array(64);
+    for (let off = 0; off < total; off += 64) {
+      for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
+      for (let i = 16; i < 64; i++) {
+        const x = w[i - 15], y = w[i - 2];
+        w[i] = w[i - 16] + (rotr(x, 7) ^ rotr(x, 18) ^ (x >>> 3)) + w[i - 7] + (rotr(y, 17) ^ rotr(y, 19) ^ (y >>> 10));
+      }
+      let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
+      for (let i = 0; i < 64; i++) {
+        const t1 = (k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) >>> 0;
+        const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+        k = g; g = f; f = e; e = (d + t1) >>> 0;
+        d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
+    }
+    const out = new Uint8Array(32);
+    const outView = new DataView(out.buffer);
+    for (let i = 0; i < 8; i++) outView.setUint32(i * 4, h[i]);
+    return out;
   }
 
+  function hmacSha256(key, message) {
+    if (key.length > 64) key = sha256(key);
+    const inner = new Uint8Array(64 + message.length), outer = new Uint8Array(64 + 32);
+    for (let i = 0; i < 64; i++) {
+      const k = i < key.length ? key[i] : 0;
+      inner[i] = k ^ 0x36;
+      outer[i] = k ^ 0x5c;
+    }
+    inner.set(message, 64);
+    outer.set(sha256(inner), 64);
+    return sha256(outer);
+  }
+
+  // UTF-8 without TextEncoder (jsdom, used by the tests, doesn't provide it).
+  function utf8Bytes(str) {
+    const out = [];
+    for (let i = 0; i < str.length; i++) {
+      let c = str.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+        const next = str.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (next - 0xdc00); i++; }
+      }
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return new Uint8Array(out);
+  }
+
+  const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  const KEY_FORMAT = /^[0-9a-f]{64}$/;
+
+  // A new random key, as 64 hex characters.
+  function randomKey() {
+    const bytes = new Uint8Array(32);
+    if (root.crypto && root.crypto.getRandomValues) root.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
+    return toHex(bytes);
+  }
+
+  // The browser's saved key, created on first use. `area` is the extension's
+  // storage.local, which isn't synced to the browser account.
+  async function loadKey(area) {
+    const stored = (await area.get("tagKey")).tagKey;
+    if (KEY_FORMAT.test(stored)) return stored;
+    const key = randomKey();
+    await area.set({ tagKey: key });
+    return key;
+  }
+
+  // Holds the key and remembers placeholders already worked out. Without a
+  // valid key it uses a random one: placeholders are then consistent only
+  // within this context, but never computed without a key.
+  function createContext(key) {
+    const hex = KEY_FORMAT.test(key) ? key : randomKey();
+    return { key: new Uint8Array(hex.match(/../g).map((b) => parseInt(b, 16))), map: new Map() };
+  }
+
+  // The tag depends on the value only, not the type: a number redacted as a
+  // bank account in one message and as a mobile in another keeps its tag.
   function placeholderFor(ctx, type, value) {
-    const key = type + "\u0000" + value;
-    let ph = ctx.map.get(key);
+    const id = type + "\u0000" + value;
+    let ph = ctx.map.get(id);
     if (!ph) {
-      ctx.counters[type] = (ctx.counters[type] || 0) + 1;
-      ph = "[REDACTED_" + type + "_" + ctx.counters[type] + "]";
-      ctx.map.set(key, ph);
+      const tag = toHex(hmacSha256(ctx.key, utf8Bytes(value))).slice(0, TAG_LENGTH);
+      ph = "[REDACTED_" + type + "_" + tag + "]";
+      ctx.map.set(id, ph);
     }
     return ph;
   }
@@ -628,8 +739,10 @@
       : det.defaultOn;
   }
 
-  const PLACEHOLDER = /\[REDACTED_[A-Z0-9_]+?_\d+\]/;
-  const PLACEHOLDER_ONLY = /^\[REDACTED_[A-Z0-9_]+?_\d+\]$/;
+  // For the UI: matches one placeholder and captures its type.
+  const PLACEHOLDER_SOURCE = "\\[REDACTED_([A-Z0-9_]+?)_[0-9a-f]{" + TAG_LENGTH + "}\\]";
+  const PLACEHOLDER = /\[REDACTED_[A-Z0-9_]+?_[0-9a-f]{6}\]/;
+  const PLACEHOLDER_ONLY = /^\[REDACTED_[A-Z0-9_]+?_[0-9a-f]{6}\]$/i;
 
   // Copies of detector regexes with the `d` flag, for match positions.
   const INDEXED = new Map();
@@ -710,7 +823,7 @@
     let customRe = null;
     if (terms.length) {
       // Placeholders are matched first and kept, so a term like "email" can't
-      // break an existing [REDACTED_EMAIL_1].
+      // break an existing [REDACTED_EMAIL_a3f9c1].
       customRe = new RegExp(PLACEHOLDER.source + "|" + termsSource, "gi");
       for (const m of text.matchAll(new RegExp(termsSource, "gi"))) {
         spans.push({ id: "CUSTOM", value: m[0], start: m.index, end: m.index + m[0].length });
@@ -757,10 +870,13 @@
     SECTIONS,
     DETECTORS,
     createContext,
+    loadKey,
+    PLACEHOLDER_SOURCE,
     redact,
     shortName,
     summarize,
     categories,
+    _hmacSha256: hmacSha256,
     _luhn: luhn,
     _verhoeff: verhoeff,
   };

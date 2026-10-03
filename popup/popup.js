@@ -10,6 +10,8 @@
   document.getElementById("version").textContent = "v" + api.runtime.getManifest().version;
 
   let settings = await api.storage.sync.get(DEFAULTS);
+  // The preview uses the saved key, so it shows the same placeholders as claude.ai.
+  const ctx = R.createContext(await R.loadKey(api.storage.local).catch(() => undefined));
 
   const $ = (id) => document.getElementById(id);
   const save = () => api.storage.sync.set(settings);
@@ -149,20 +151,20 @@
     summary.textContent = "";
     const src = $("test").value;
     if (!src) return;
-    const { text, findings, matches } = R.redact(src, { overrides: settings.overrides, customTerms: settings.customTerms });
+    const { text, findings, matches } = R.redact(src, { overrides: settings.overrides, customTerms: settings.customTerms, ctx });
     const byPlaceholder = new Map(matches.map((m) => [m.placeholder, m]));
-    for (const part of text.split(/(\[REDACTED_[A-Z0-9_]+?_\d+\])/)) {
-      if (!part) continue;
-      const m = part.match(/^\[REDACTED_([A-Z0-9_]+?)_\d+\]$/);
-      if (m) {
-        const s = document.createElement("span");
-        s.className = "bar";
-        s.textContent = R.shortName(m[1]);
-        const match = byPlaceholder.get(part);
-        s.title = (match ? R.categories(match) + ": " : "") + part;
-        out.appendChild(s);
-      } else out.appendChild(document.createTextNode(part));
+    let at = 0;
+    for (const m of text.matchAll(new RegExp(R.PLACEHOLDER_SOURCE, "g"))) {
+      if (m.index > at) out.appendChild(document.createTextNode(text.slice(at, m.index)));
+      const s = document.createElement("span");
+      s.className = "bar";
+      s.textContent = R.shortName(m[1]);
+      const match = byPlaceholder.get(m[0]);
+      s.title = (match ? R.categories(match) + ": " : "") + m[0];
+      out.appendChild(s);
+      at = m.index + m[0].length;
     }
+    if (at < text.length) out.appendChild(document.createTextNode(text.slice(at)));
     // Same summary as the on-page label, including other matched categories.
     summary.textContent = matches.length ? R.summarize(findings, matches) : "";
   }

@@ -3,11 +3,28 @@ const assert = require("assert");
 const R = require("../src/detectors.js");
 
 let pass = 0, fail = 0;
+const pending = []; // async tests, awaited before the summary
 function t(name, fn) {
-  try { fn(); pass++; console.log("  ok   " + name); }
-  catch (e) { fail++; console.log("  FAIL " + name + "\n       " + e.message.split("\n").join("\n       ")); }
+  const ok = () => { pass++; console.log("  ok   " + name); };
+  const bad = (e) => { fail++; console.log("  FAIL " + name + "\n       " + e.message.split("\n").join("\n       ")); };
+  try {
+    const result = fn();
+    if (result && typeof result.then === "function") pending.push(result.then(ok, bad));
+    else ok();
+  } catch (e) { bad(e); }
 }
-const red = (s, o) => R.redact(s, o).text;
+// Placeholders carry a keyed tag ([REDACTED_EMAIL_3e1a38]). For readable
+// assertions, tags are renumbered per type in order of appearance (_1, _2, ...).
+const PH = /\[REDACTED_([A-Z0-9_]+?)_([0-9a-f]{6})\]/g;
+const numberer = () => {
+  const seen = {};
+  return (text) => text.replace(PH, (_, type, tag) => {
+    const tags = (seen[type] = seen[type] || []);
+    if (!tags.includes(tag)) tags.push(tag);
+    return "[REDACTED_" + type + "_" + (tags.indexOf(tag) + 1) + "]";
+  });
+};
+const red = (s, o) => numberer()(R.redact(s, o).text);
 const hits = (s, o) => R.redact(s, o).findings;
 const only = (s, id, o) => assert.deepStrictEqual(Object.keys(hits(s, o)), [id], JSON.stringify(hits(s, o)));
 const none = (s, o) => assert.deepStrictEqual(hits(s, o), {});
@@ -128,16 +145,55 @@ t("voter ID and passport are opt-in", () => {
 t("US SSN", () => only("ssn 123-45-6789", "US_SSN"));
 
 console.log("Behaviour");
-t("stable placeholders across calls", () => {
-  const ctx = R.createContext();
-  assert.strictEqual(red("a@b.com and c@d.com and a@b.com", { ctx }),
-    "[REDACTED_EMAIL_1] and [REDACTED_EMAIL_2] and [REDACTED_EMAIL_1]");
-  assert.strictEqual(red("again a@b.com", { ctx }), "again [REDACTED_EMAIL_1]");
-});
+t("same value, same placeholder within a text", () =>
+  assert.strictEqual(red("a@b.com and c@d.com and a@b.com"),
+    "[REDACTED_EMAIL_1] and [REDACTED_EMAIL_2] and [REDACTED_EMAIL_1]"));
 t("matches report original values and placeholders", () => {
-  const { matches } = R.redact("x a@b.com y 10.1.2.3");
-  assert.deepStrictEqual(matches.map((m) => [m.id, m.value, m.placeholder]).sort(), [
-    ["EMAIL", "a@b.com", "[REDACTED_EMAIL_1]"], ["IPV4", "10.1.2.3", "[REDACTED_IPV4_1]"]]);
+  const { text, matches } = R.redact("x a@b.com y 10.1.2.3");
+  assert.deepStrictEqual(matches.map((m) => [m.id, m.value]).sort(), [["EMAIL", "a@b.com"], ["IPV4", "10.1.2.3"]]);
+  for (const m of matches) assert.ok(text.includes(m.placeholder), m.placeholder + " is in the text");
+});
+
+console.log("Placeholder tags");
+const KEY = "ab".repeat(32), OTHER_KEY = "cd".repeat(32);
+const withKey = (s, key, o) => R.redact(s, { ...o, ctx: R.createContext(key) }).text;
+const tagOf = (key, value) => require("crypto").createHmac("sha256", Buffer.from(key, "hex")).update(value, "utf8").digest("hex").slice(0, 6);
+t("tag is the start of HMAC-SHA-256(key, value)", () => {
+  assert.strictEqual(withKey("mail a@b.com", KEY), "mail [REDACTED_EMAIL_" + tagOf(KEY, "a@b.com") + "]");
+  // Non-ASCII and multi-block values go through the same hashing.
+  const term = "\u092a\u094d\u0930\u094b\u091c\u0947\u0915\u094d\u091f \ud83d\ude00 " + "x".repeat(150);
+  assert.strictEqual(withKey("re " + term, KEY, { customTerms: [term] }), "re [REDACTED_CUSTOM_" + tagOf(KEY, term) + "]");
+});
+t("same key: same placeholder in a new context (after a reload, in another chat)", () =>
+  assert.strictEqual(withKey("again a@b.com", KEY), "again [REDACTED_EMAIL_" + tagOf(KEY, "a@b.com") + "]"));
+t("different key: different placeholder", () =>
+  assert.notStrictEqual(withKey("mail a@b.com", KEY), withKey("mail a@b.com", OTHER_KEY)));
+t("without a key, a random one is used: consistent in a context, different across", () => {
+  const ctx = R.createContext();
+  assert.strictEqual(R.redact("a@b.com", { ctx }).text, R.redact("a@b.com", { ctx }).text);
+  assert.notStrictEqual(R.redact("a@b.com").text, R.redact("a@b.com").text);
+  assert.notStrictEqual(R.redact("a@b.com").text, "[REDACTED_EMAIL_" + tagOf("00".repeat(32), "a@b.com") + "]");
+});
+t("tag follows the value, not the category", () => {
+  const tag = tagOf(KEY, "9876543210");
+  assert.strictEqual(withKey("account number: 9876543210 / call 9876543210", KEY),
+    "account number: [REDACTED_BANK_ACCOUNT_" + tag + "] / call [REDACTED_IN_MOBILE_" + tag + "]");
+});
+t("custom terms ignore case in the tag", () =>
+  assert.strictEqual(withKey("Acme and ACME", KEY, { customTerms: ["acme"] }),
+    "[REDACTED_CUSTOM_" + tagOf(KEY, "acme") + "] and [REDACTED_CUSTOM_" + tagOf(KEY, "acme") + "]"));
+t("placeholder pattern matches the format and captures the type", () => {
+  const m = withKey("a@b.com", KEY).match(new RegExp("^" + R.PLACEHOLDER_SOURCE + "$"));
+  assert.ok(m && m[1] === "EMAIL");
+  assert.ok(!new RegExp(R.PLACEHOLDER_SOURCE).test("[REDACTED_EMAIL_1]"), "old numbered format is not a placeholder");
+});
+t("loadKey creates a key once and reuses it", async () => {
+  const saved = {};
+  const area = { get: async () => saved, set: async (o) => Object.assign(saved, o) };
+  const first = await R.loadKey(area);
+  assert.match(first, /^[0-9a-f]{64}$/);
+  assert.strictEqual(await R.loadKey(area), first);
+  assert.strictEqual(saved.tagKey, first);
 });
 t("custom terms", () => assert.strictEqual(
   red("Status of project falcon?", { customTerms: ["Project Falcon"] }), "Status of [REDACTED_CUSTOM_1]?"));
@@ -212,7 +268,9 @@ t("custom term containing a detected value is redacted whole", () => {
 t("custom term is still redacted when its detector is off", () =>
   assert.strictEqual(red("mail jane@acme.com", { customTerms: ["acme"], overrides: { EMAIL: false } }), "mail jane@[REDACTED_CUSTOM_1].com"));
 t("custom term doesn't break existing placeholders", () =>
-  assert.strictEqual(red("see [REDACTED_EMAIL_1] and my email", { customTerms: ["email"] }), "see [REDACTED_EMAIL_1] and my [REDACTED_CUSTOM_1]"));
+  assert.strictEqual(red("see [REDACTED_EMAIL_3e1a38] and my email", { customTerms: ["email"] }), "see [REDACTED_EMAIL_1] and my [REDACTED_CUSTOM_1]"));
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+Promise.all(pending).then(() => {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

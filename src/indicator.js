@@ -17,7 +17,7 @@
   "use strict";
   const R = globalThis.PromptRedaction;
   const EDITABLE = '[contenteditable="true"], textarea';
-  const PH_RE = /\[REDACTED_([A-Z0-9_]+?)_\d+\]/g;
+  const PH_RE = new RegExp(R.PLACEHOLDER_SOURCE, "g");
 
   let settings = { enabled: true, overrides: {}, customTerms: [] };
   const sent = new Map();      // original value -> match the AI received a placeholder for
