@@ -46,6 +46,11 @@ function makePage(settings) {
   return { win, sent, toasts, xhrSent, ctx };
 }
 
+// Waits for a condition instead of a fixed delay, so slow CI machines don't fail.
+const until = async (cond, ms = 5000) => {
+  for (const end = Date.now() + ms; !cond() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5));
+};
+
 const url = "/api/organizations/o/chat_conversations/c/completion";
 const post = (win, u, body) => win.fetch(u, { method: "POST", body });
 
@@ -102,7 +107,8 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   const xhr = (method, u, body, async) => { const x = new win.XMLHttpRequest(); x.open(method, u, async); x.send(body); };
   xhr("POST", url, gz(withFile()));
   assert.strictEqual(page.xhrSent.length, 0, "send waits for redaction");
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => page.xhrSent.length > 0);
+  await new Promise((r) => setTimeout(r, 20)); // room for a wrong second send to show up
   assert.strictEqual(page.xhrSent.length, 1, "then goes out once");
   assert.strictEqual(attachmentOf(page.xhrSent[0]), "contact [REDACTED_EMAIL_2]", "gzip XHR body");
   xhr("GET", url, '{"prompt":"a@b.com"}');
