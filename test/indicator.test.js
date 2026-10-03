@@ -73,6 +73,15 @@ const post = (data) => w.dispatchEvent(new w.MessageEvent("message", { data, sou
   await wait(600);
   assert.deepStrictEqual(marked("apr-sent"), ["jane@acme.com"], "a value later sent unredacted is no longer marked");
 
+  // The detector is switched off and the same value is sent again: it goes out
+  // unredacted, so the page must stop marking it "not sent".
+  store.sync.overrides = { BANK_ACCOUNT: false, IN_MOBILE: false };
+  store.changed({}, "sync");
+  await wait(50);
+  post({ tag: "__prompt_redaction__", type: "redact", id: "t2", strings: ["account number 9876543210 again"] });
+  await wait(600);
+  assert.deepStrictEqual(marked("apr-sent"), ["jane@acme.com"], "a value later sent unredacted is no longer marked");
+
   box.firstChild.textContent = "";
   await wait(700);
   assert.ok(!w.document.querySelector(".apr-pill"), "label hidden after box clears");
