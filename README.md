@@ -16,8 +16,8 @@ A browser extension to redact secrets and sensitive data before they are sent to
 
 ## Features
 
-- **Redacts before sending** - sensitive values are replaced with placeholders such as `[REDACTED_EMAIL_1]`.
-- **Consistent placeholders** - the same value always gets the same placeholder, so the AI can still follow references to it.
+- **Redacts before sending** - sensitive values are replaced with placeholders such as `[REDACTED_EMAIL_3e1a38]`.
+- **Consistent placeholders** - the same value always gets the same placeholder, in every chat and after a reload or browser restart, so the AI can still follow references to it. Your values are never stored: the short code at the end is computed from the value with a random key that stays in your browser.
 - **Shows what it changed** - values are highlighted as you type, and stay marked in the chat after sending.
 - **Custom terms** - add your own words to redact, such as client names or product names.
 - **Try it** - preview in the popup what would be redacted.
@@ -109,8 +109,11 @@ Your browser may remind you that a developer-mode extension is installed. That's
 
 ## Permissions
 
-- `storage` - saves your settings and a count of redacted items. Settings use the browser's sync storage, so they follow your browser account if you have sync turned on.
-- Access to `claude.ai` - needed to scan messages before they're sent. In Firefox you can revoke this. If you do, the popup shows a button to grant it again.
+- `storage`:
+  - **Your settings** (on/off, detector switches, custom terms). These use the browser's sync storage, so they follow your browser account if you have sync turned on.
+  - **A count of redacted items.** Stays on device.
+  - **A random key** used to compute placeholder codes. Stays on device.
+- Access to `claude.ai` - needed to scan messages before they're sent.
 
 ## Limitations
 
