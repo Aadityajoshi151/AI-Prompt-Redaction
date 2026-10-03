@@ -4,6 +4,11 @@
   const DEFAULTS = { enabled: true, overrides: {}, customTerms: [] };
   const api = globalThis.browser ?? globalThis.chrome;
   const HOST = { origins: ["https://claude.ai/*"] };
+
+  // Footer version is read from manifest.json, so bumping it there is the only
+  // change a release needs.
+  document.getElementById("version").textContent = "v" + api.runtime.getManifest().version;
+
   let settings = await api.storage.sync.get(DEFAULTS);
 
   const $ = (id) => document.getElementById(id);
