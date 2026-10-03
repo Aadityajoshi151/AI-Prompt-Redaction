@@ -1,8 +1,9 @@
 /*
  * Runs in the page's MAIN world at document_start, before claude.ai's own code,
- * so every call to fetch() goes through this wrapper. Outgoing JSON bodies sent
- * to claude.ai's API have their user-text fields redacted before the request
- * leaves the browser.
+ * so every fetch() and XMLHttpRequest goes through these wrappers. Outgoing JSON
+ * bodies sent to claude.ai's API have their user-text fields redacted before
+ * the request leaves the browser, including gzip-compressed bodies (claude.ai
+ * compresses larger requests, e.g. messages with text attachments).
  *
  * The detectors and settings live in the content script (bridge.js), not here:
  * Chromium injects a file only once even when two content_scripts entries list
@@ -80,6 +81,39 @@
     return JSON.stringify(data);
   }
 
+  // Bodies arrive as text, bytes, Blobs or streams. Returns { text, gzip, raw }
+  // (raw: the original bytes, when reading used the body up), or null when the
+  // body isn't something we can read as JSON (FormData, URLSearchParams).
+  async function readBody(body) {
+    if (typeof body === "string") return { text: body, gzip: false, raw: null };
+    let bytes, raw = null;
+    if (ArrayBuffer.isView(body)) bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    else if (Object.prototype.toString.call(body) === "[object ArrayBuffer]") bytes = new Uint8Array(body);
+    else if (typeof Blob === "function" && body instanceof Blob) bytes = new Uint8Array(await body.arrayBuffer());
+    else if (typeof ReadableStream === "function" && body instanceof ReadableStream) {
+      bytes = raw = new Uint8Array(await new Response(body).arrayBuffer());
+    } else return null;
+    const gzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+    if (gzip) bytes = await pipe(bytes, new DecompressionStream("gzip"));
+    return { text: new TextDecoder().decode(bytes), gzip, raw };
+  }
+
+  async function pipe(data, transform) {
+    const stream = new Blob([data]).stream().pipeThrough(transform);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  // Returns a body to send instead of the original, or null to send it as is.
+  // Redacted JSON goes back in the same encoding: gzip stays gzip.
+  async function redactPayload(body) {
+    const read = await readBody(body);
+    if (!read) return null;
+    const text = await redactBody(read.text);
+    if (text === null) return read.raw; // a used-up stream is replaced by its bytes
+    if (read.gzip) return pipe(new TextEncoder().encode(text), new CompressionStream("gzip"));
+    return typeof body === "string" ? text : new TextEncoder().encode(text);
+  }
+
   function isTarget(url, method) {
     if (!/^(POST|PUT|PATCH)$/i.test(method || "GET")) return false;
     try {
@@ -97,12 +131,11 @@
       const method = (init && init.method) || (isReq ? input.method : "GET");
 
       if (isTarget(url, method)) {
-        if (init && init.body !== undefined) {
-          const newBody = await redactBody(init.body);
+        if (init && init.body != null) {
+          const newBody = await redactPayload(init.body);
           if (newBody !== null) init = Object.assign({}, init, { body: newBody });
-        } else if (isReq) {
-          const text = await input.clone().text();
-          const newBody = await redactBody(text);
+        } else if (isReq && input.body) {
+          const newBody = await redactPayload(await input.clone().arrayBuffer());
           if (newBody !== null) input = new Request(input, { body: newBody });
         }
       }
@@ -113,4 +146,33 @@
   }
   redactingFetch.__promptRedaction = true;
   window.fetch = redactingFetch;
+
+  // XMLHttpRequest: send() is held back while the body is redacted, then the
+  // real send() goes out with the new body. Synchronous requests can't wait,
+  // so they pass through unchanged.
+  const XHR = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+  if (XHR) {
+    const origOpen = XHR.open, origSend = XHR.send;
+    const META = Symbol("promptRedaction");
+    XHR.open = function (method, url, async) {
+      this[META] = { method, url: String(url), async: arguments.length < 3 || async !== false };
+      return origOpen.apply(this, arguments);
+    };
+    XHR.send = function (body) {
+      const meta = this[META];
+      if (!meta || !meta.async || body == null || !isTarget(meta.url, meta.method)) {
+        return origSend.apply(this, arguments);
+      }
+      const xhr = this;
+      redactPayload(body)
+        .catch((err) => {
+          console.warn("[AI Prompt Redaction] redaction failed, request sent unchanged:", err);
+          return null;
+        })
+        .then((newBody) => {
+          try { origSend.call(xhr, newBody === null ? body : newBody); }
+          catch (_) { /* the page aborted the request while we were redacting */ }
+        });
+    };
+  }
 })();

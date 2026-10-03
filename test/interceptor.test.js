@@ -2,6 +2,7 @@
 // world) against a fake page and checks what would go over the network.
 // Run with: node test/interceptor.test.js
 const vm = require("vm"), fs = require("fs"), path = require("path"), assert = require("assert");
+const zlib = require("zlib");
 
 const load = (ctx, files) => {
   for (const f of files) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx);
@@ -11,7 +12,12 @@ const load = (ctx, files) => {
 // asynchronously to every listener, like window.postMessage in a browser.
 // Both worlds share it here, as they share window.postMessage in a real tab.
 function makePage(settings) {
-  const sent = [], toasts = [], listeners = [];
+  const sent = [], toasts = [], listeners = [], xhrSent = [];
+  // Stand-in for the browser's XMLHttpRequest: records what send() receives.
+  class FakeXHR {
+    open(method, url) { this.url = url; }
+    send(body) { xhrSent.push(body); }
+  }
   let self; // the sandbox's global as scripts see it (vm wraps win), used as event.source
   const win = {
     location: { origin: "https://claude.ai", href: "https://claude.ai/chat/x" },
@@ -24,6 +30,8 @@ function makePage(settings) {
       return { ok: true };
     },
     Request, URL, JSON, console, Object, Array, Set, Map, Math, Promise, String, Date, setTimeout, clearTimeout,
+    Symbol, Blob, Response, ReadableStream, TextEncoder, TextDecoder, CompressionStream, DecompressionStream,
+    XMLHttpRequest: FakeXHR,
     // Content-script side: extension storage and the on-page indicator.
     chrome: { storage: {
       sync: { get: async (d) => ({ ...d, ...settings }) },
@@ -34,7 +42,7 @@ function makePage(settings) {
   win.window = win; win.globalThis = win;
   const ctx = vm.createContext(win);
   self = vm.runInContext("window", ctx);
-  return { win, sent, toasts, ctx };
+  return { win, sent, toasts, xhrSent, ctx };
 }
 
 const url = "/api/organizations/o/chat_conversations/c/completion";
@@ -68,6 +76,39 @@ const post = (win, u, body) => win.fetch(u, { method: "POST", body });
   // JSON round-trip: objects from the vm sandbox have a different Object.prototype
   assert.deepStrictEqual(JSON.parse(JSON.stringify(toasts[0].findings)), { ANTHROPIC_KEY: 1, EMAIL: 1, SECRET_ASSIGNMENT: 1 });
   assert.ok(toasts[0].matches.some((m) => m.value === "a@b.com" && m.placeholder === "[REDACTED_EMAIL_1]"));
+
+  // ---------- gzip, binary and stream bodies (claude.ai gzips larger requests) ----------
+  const withFile = (extra) => JSON.stringify({ prompt: "see file",
+    attachments: [{ file_name: "notes.txt", extracted_content: "contact jane@acme.com" + (extra || "") }] });
+  const gz = (text) => new Uint8Array(zlib.gzipSync(text));
+  const attachmentOf = (buf) => JSON.parse(zlib.gunzipSync(Buffer.from(buf)).toString()).attachments[0].extracted_content;
+  sent.length = 0; toasts.length = 0;
+
+  await post(win, url, gz(withFile()));
+  assert.strictEqual(attachmentOf(sent[0]), "contact [REDACTED_EMAIL_2]", "gzip bytes: attachment redacted, still gzip");
+  await post(win, url, new Blob([gz(withFile(" again"))]));
+  assert.strictEqual(attachmentOf(sent[1]), "contact [REDACTED_EMAIL_2] again", "gzip Blob");
+  await post(win, url, new TextEncoder().encode(withFile()));
+  assert.match(new TextDecoder().decode(sent[2]), /contact \[REDACTED_EMAIL_2\]/, "plain bytes");
+  await win.fetch(url, { method: "POST", body: new Blob([gz(withFile())]).stream(), duplex: "half" });
+  assert.strictEqual(attachmentOf(sent[3]), "contact [REDACTED_EMAIL_2]", "gzip stream");
+  const clean = gz('{"prompt":"nothing to hide"}');
+  await post(win, url, clean);
+  assert.strictEqual(sent[4], clean, "unchanged bodies are sent as the same object");
+  assert.strictEqual(toasts.length, 4, "a toast for each redacted request");
+
+  // ---------- XMLHttpRequest ----------
+  const xhr = (method, u, body, async) => { const x = new win.XMLHttpRequest(); x.open(method, u, async); x.send(body); };
+  xhr("POST", url, gz(withFile()));
+  assert.strictEqual(page.xhrSent.length, 0, "send waits for redaction");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.strictEqual(page.xhrSent.length, 1, "then goes out once");
+  assert.strictEqual(attachmentOf(page.xhrSent[0]), "contact [REDACTED_EMAIL_2]", "gzip XHR body");
+  xhr("GET", url, '{"prompt":"a@b.com"}');
+  xhr("POST", "https://elsewhere.com/api/x", '{"prompt":"a@b.com"}');
+  xhr("POST", url, '{"prompt":"a@b.com"}', false);
+  assert.deepStrictEqual(page.xhrSent.slice(1), Array(3).fill('{"prompt":"a@b.com"}'),
+    "GET, other origins and synchronous XHRs pass through unchanged");
 
   // ---------- settings come from the content script ----------
   const custom = makePage({ customTerms: ["Project Falcon"], overrides: { EMAIL: false } });
