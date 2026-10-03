@@ -21,7 +21,7 @@ const store = { sync: {}, local: {} };
 w.chrome = { storage: {
   sync: { get: async (d) => ({ ...d, ...store.sync }), set: async (o) => Object.assign(store.sync, o) },
   local: { get: async () => store.local, set: async (o) => Object.assign(store.local, o) },
-  onChanged: { addListener() {} } } };
+  onChanged: { addListener: (fn) => (store.changed = fn) } } };
 
 for (const f of ["src/detectors.js", "src/indicator.js", "src/bridge.js"]) {
   w.eval(fs.readFileSync(path.join(__dirname, "..", f), "utf8"));
@@ -58,6 +58,15 @@ const post = (data) => w.dispatchEvent(new w.MessageEvent("message", { data, sou
   w.document.getElementById("chat").appendChild(reply);
   await wait(600);
   assert.deepStrictEqual(marked("apr-placeholder"), ["[REDACTED_BANK_ACCOUNT_1]", "[REDACTED_EMAIL_1]"]);
+
+  // The detector is switched off and the same value is sent again: it goes out
+  // unredacted, so the page must stop marking it "not sent".
+  store.sync.overrides = { BANK_ACCOUNT: false, IN_MOBILE: false };
+  store.changed({}, "sync");
+  await wait(50);
+  post({ tag: "__prompt_redaction__", type: "redact", id: "t2", strings: ["account number 9876543210 again"] });
+  await wait(600);
+  assert.deepStrictEqual(marked("apr-sent"), ["jane@acme.com"], "a value later sent unredacted is no longer marked");
 
   box.firstChild.textContent = "";
   await wait(700);

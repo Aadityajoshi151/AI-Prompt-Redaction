@@ -77,7 +77,13 @@
   }
 
   // Returns the new body string, or null if nothing changed.
-  async function redactBody(body) {
+  // Debug only: what was changed in a request (where, how long the text was,
+  // and which placeholders went in). Never the text itself.
+  const noteChange = (log, where, before, after) => {
+    if (log && before !== after) log.push({ where, length: before.length, placeholders: after.match(/\[REDACTED_[A-Z0-9_]+?_\d+\]/g) || [] });
+  };
+
+  async function redactBody(body, log) {
     if (typeof body !== "string" || body[0] !== "{" && body[0] !== "[") return null;
     let data;
     try { data = JSON.parse(body); } catch (_) { return null; }
@@ -85,7 +91,7 @@
     if (!fields.length) return null;
     const texts = await redactStrings(fields.map(([obj, key]) => obj[key]));
     if (!texts) return null;
-    fields.forEach(([obj, key], i) => { obj[key] = texts[i]; });
+    fields.forEach(([obj, key], i) => { noteChange(log, "json key " + key, obj[key], texts[i]); obj[key] = texts[i]; });
     return JSON.stringify(data);
   }
 
@@ -223,7 +229,7 @@
   }
 
   // Returns the redacted message bytes, or null if nothing changed.
-  async function redactProto(bytes) {
+  async function redactProto(bytes, log) {
     const env = await openEnvelope(bytes);
     const fields = parseProto(env.message, 0);
     if (!fields) return null;
@@ -233,6 +239,7 @@
     if (!texts) return null;
     strings.forEach((s, i) => {
       if (texts[i] === s.field.text) return;
+      noteChange(log, "field " + s.parents.concat(s.field).map((f) => f.field).join("."), s.field.text, texts[i]);
       s.field.text = texts[i];
       s.field.changed = true;
       for (const p of s.parents) p.changed = true;
@@ -252,9 +259,11 @@
   async function redactPayload(body, url) {
     const read = await readBody(body);
     if (!read) return null;
-    let out = await redactBody(read.text);
+    const log = DEBUG ? [] : null;
+    let out = await redactBody(read.text, log);
     if (out !== null) out = typeof body === "string" && !read.gzip ? out : new TextEncoder().encode(out);
-    else if (read.bytes && isRpc(url)) out = await redactProto(read.bytes);
+    else if (read.bytes && isRpc(url)) out = await redactProto(read.bytes, log);
+    if (log && log.length) console.log("[AI Prompt Redaction debug] redacted", JSON.stringify({ path: sameOriginPath(url), changes: log }));
     if (out === null) return read.raw; // a used-up stream is replaced by its bytes
     return read.gzip ? pipe(out, new CompressionStream("gzip")) : out;
   }

@@ -246,6 +246,16 @@
       settings = s;
       if (composer) scanComposer();
     },
+    // Text about to leave the browser. A value redacted earlier that now goes
+    // out as is (its detector or the master switch was turned off) has reached
+    // the AI, so its copies in the chat are no longer marked "not sent".
+    onOutgoing(texts) {
+      let forgot = false;
+      for (const value of [...sent.keys()]) {
+        if (texts.some((t) => t.indexOf(value) !== -1)) { sent.delete(value); forgot = true; }
+      }
+      if (forgot) schedulePageScan();
+    },
     onRedacted(findings, matches) {
       for (const m of matches) sent.set(m.value, m);
       clearPending();
