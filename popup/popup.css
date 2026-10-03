@@ -32,6 +32,10 @@ textarea:focus-visible, input:focus-visible + .track { outline: 2px solid var(--
 }
 .preview:empty, .preview-summary:empty { display: none; }
 .preview-summary { margin: 6px 0 0; font-size: 12px; }
+.field-hint { margin: 6px 0 0; font-size: 12px; }
+/* Shown only while the master switch is off */
+.off-note { display: none; margin: 8px 0 0; font-size: 12px; }
+body.off .off-note { display: block; }
 /* The redaction bar: ink block with the placeholder name set small inside it */
 .bar {
   background: var(--ink); color: var(--marker); border-radius: 2px;
@@ -94,6 +98,7 @@ button.link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; 
 .notice button:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-body.off .group, body.off #terms, body.off .sec-head button.link { opacity: .5; }
+body.off .group, body.off #terms, body.off .sec-head button.link,
+body.off .preview, body.off .preview-summary { opacity: .5; }
 
 @media (prefers-reduced-motion: reduce) { .track, .track::after, .sec-toggle::before { transition: none; } }
